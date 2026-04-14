@@ -390,6 +390,43 @@ class RegressionTests(unittest.TestCase):
         self.assertIn("server.out.log", base_files)
         self.assertIn("server.err.log", base_files)
 
+    def test_openrouter_partial_status_when_short_of_target(self):
+        class _Response:
+            def __init__(self, payload):
+                self.status_code = 200
+                self.text = ""
+                self._payload = payload
+
+            def json(self):
+                return self._payload
+
+        class _ClientStub:
+            def __init__(self, responses):
+                self._responses = list(responses)
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb):
+                return False
+
+            async def post(self, *args, **kwargs):
+                return self._responses.pop(0)
+
+        responses = [
+            _Response({"choices": [{"message": {"content": "https://alpha.example\nhttps://beta.example"}}], "model": "model-a"}),
+            _Response({"choices": [{"message": {"content": "https://alpha.example\nhttps://beta.example"}}], "model": "model-a"}),
+            _Response({"choices": [{"message": {"content": "https://alpha.example\nhttps://beta.example"}}], "model": "model-a"}),
+        ]
+
+        with patch("search.ai_generator._get_api_key", return_value="sk-test"), \
+             patch("search.ai_generator._candidate_models", return_value=["model-a"]), \
+             patch("search.ai_generator.httpx.AsyncClient", return_value=_ClientStub(responses)):
+            result = asyncio.run(generate_ai_urls_with_meta("agency", "Seattle", "USA", count=4))
+
+        self.assertEqual(result["status"], "partial")
+        self.assertEqual(result["urls"], ["https://alpha.example", "https://beta.example"])
+
 
 if __name__ == "__main__":
     unittest.main()

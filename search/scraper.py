@@ -215,6 +215,13 @@ def _parse_bing_results(html: str) -> list[str]:
             elif "." in text and not text.startswith("<"):
                 urls.append("https://" + text)
 
+    # Last-resort fallback: harvest external URLs from raw HTML.
+    if not urls:
+        for match in re.findall(r'https?://[^"\'>\s]+', html):
+            if "bing.com" in match:
+                continue
+            urls.append(match.rstrip(".,;:)"))
+
     return urls
 
 

@@ -64,6 +64,21 @@ https://www.acmeroofing.com
 https://www.citycleaners.net"""
 
 
+def _build_followup_prompt(niche: str, city: str, country: str, count: int, seen_urls: list[str]) -> str:
+    seen_block = "\n".join(seen_urls[:80]) if seen_urls else "None yet"
+    return f"""Generate {count} MORE real business website URLs for "{niche}" businesses in or serving {city}, {country}.
+
+Already found URLs to avoid repeating:
+{seen_block}
+
+Rules:
+- Return ONLY new business website URLs not already listed above
+- No directories, social profiles, marketplaces, aggregators, or government sites
+- Full URLs starting with https://
+- One URL per line
+- No numbering, no markdown, no commentary"""
+
+
 async def generate_ai_urls(niche: str, city: str, country: str, count: int = 40) -> list[str]:
     """
     Generate business URLs using OpenRouter AI.
@@ -89,8 +104,6 @@ async def generate_ai_urls_with_meta(niche: str, city: str, country: str, count:
             "error": "OpenRouter API key not configured",
         }
 
-    prompt = _build_prompt(niche, city, country, count)
-
     headers = {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
@@ -99,44 +112,76 @@ async def generate_ai_urls_with_meta(niche: str, city: str, country: str, count:
     }
 
     errors = []
+    collected_urls = []
     try:
         async with httpx.AsyncClient(timeout=httpx.Timeout(30.0)) as client:
-            for model in _candidate_models():
-                payload = {
-                    "model": model,
-                    "messages": [{"role": "user", "content": prompt}],
-                    "temperature": 0.7,
-                    "max_tokens": 2000,
-                }
-                logger.info("OpenRouter AI: generating URLs with %s", model)
-                resp = await client.post(OPENROUTER_API_URL, json=payload, headers=headers)
+            selected_actual_model = None
+            selected_requested_model = _get_model()
+            for attempt in range(3):
+                remaining = count - len({url.lower() for url in collected_urls})
+                if remaining <= 0:
+                    break
 
-                if resp.status_code != 200:
-                    error_text = f"{model}: HTTP {resp.status_code} - {resp.text[:200]}"
-                    logger.warning("OpenRouter returned %s", error_text)
-                    errors.append(error_text)
-                    continue
+                prompt = (
+                    _build_prompt(niche, city, country, remaining)
+                    if attempt == 0
+                    else _build_followup_prompt(niche, city, country, remaining, collected_urls)
+                )
 
-                data = resp.json()
-                actual_model = data.get("model") or model
-                content = _extract_content(data)
-                urls = _parse_urls(content)
-                if urls:
-                    logger.info(
-                        "OpenRouter AI: generated %s URLs with requested=%s actual=%s",
-                        len(urls), model, actual_model,
-                    )
-                    return {
-                        "urls": urls,
-                        "status": "ok",
-                        "requested_model": _get_model(),
-                        "actual_model": actual_model,
-                        "error": None,
+                round_urls = []
+                for model in _candidate_models():
+                    payload = {
+                        "model": model,
+                        "messages": [{"role": "user", "content": prompt}],
+                        "temperature": 0.7 if attempt == 0 else 0.9,
+                        "max_tokens": 2000,
                     }
+                    logger.info("OpenRouter AI: generating URLs with %s attempt=%s", model, attempt + 1)
+                    resp = await client.post(OPENROUTER_API_URL, json=payload, headers=headers)
 
-                error_text = f"{model}: response contained no parseable URLs"
-                logger.warning("OpenRouter returned no usable URLs for %s", model)
-                errors.append(error_text)
+                    if resp.status_code != 200:
+                        error_text = f"{model}: HTTP {resp.status_code} - {resp.text[:200]}"
+                        logger.warning("OpenRouter returned %s", error_text)
+                        errors.append(error_text)
+                        continue
+
+                    data = resp.json()
+                    actual_model = data.get("model") or model
+                    content = _extract_content(data)
+                    urls = _parse_urls(content)
+                    if urls:
+                        selected_actual_model = actual_model
+                        round_urls = urls
+                        logger.info(
+                            "OpenRouter AI: generated %s URLs with requested=%s actual=%s attempt=%s",
+                            len(urls), model, actual_model, attempt + 1,
+                        )
+                        break
+
+                    error_text = f"{model}: response contained no parseable URLs"
+                    logger.warning("OpenRouter returned no usable URLs for %s", model)
+                    errors.append(error_text)
+
+                if not round_urls:
+                    break
+
+                seen = {url.lower() for url in collected_urls}
+                for url in round_urls:
+                    key = url.lower()
+                    if key not in seen:
+                        seen.add(key)
+                        collected_urls.append(url)
+
+            unique_count = len(collected_urls)
+            if collected_urls:
+                status = "ok" if unique_count >= count else "partial"
+                return {
+                    "urls": collected_urls[:count],
+                    "status": status,
+                    "requested_model": selected_requested_model,
+                    "actual_model": selected_actual_model,
+                    "error": None if status == "ok" else f"Only generated {unique_count} of {count} requested URLs",
+                }
 
     except Exception as e:
         logger.error("OpenRouter AI error: %s", e)
