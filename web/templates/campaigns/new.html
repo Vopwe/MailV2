@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block title %}New Campaign — Email Extractor{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>New Campaign</h1>
+</div>
+
+<form method="post" class="form-card">
+    <div class="form-group">
+        <label for="name">Campaign Name *</label>
+        <input type="text" id="name" name="name" placeholder="e.g., Plumbers in New York" required>
+    </div>
+
+    <div class="form-group">
+        <label for="niches">Niche Keywords * <span class="hint">(comma-separated)</span></label>
+        <textarea id="niches" name="niches" rows="3" placeholder="e.g., plumber, electrician, hvac contractor" required></textarea>
+    </div>
+
+    <div class="form-group">
+        <label>Countries *</label>
+        <div class="checkbox-grid" id="countries-grid">
+            {% for country, data in locations.items() %}
+            <label class="checkbox-label">
+                <input type="checkbox" name="countries" value="{{ country }}" onchange="updateCities()">
+                {{ country }}
+            </label>
+            {% endfor %}
+        </div>
+    </div>
+
+    <div class="form-group">
+        <label>Cities <span class="hint">(leave empty for all cities in selected countries, max 20 per country)</span></label>
+        <div class="checkbox-grid scrollable" id="cities-grid">
+            <p class="hint">Select a country first</p>
+        </div>
+    </div>
+
+    <div class="form-actions">
+        <button type="submit" class="btn btn-primary">Create Campaign</button>
+        <a href="/campaigns" class="btn btn-secondary">Cancel</a>
+    </div>
+</form>
+
+<script>
+    const locationsData = {{ locations | tojson }};
+
+    function updateCities() {
+        const grid = document.getElementById('cities-grid');
+        const checked = document.querySelectorAll('input[name="countries"]:checked');
+        const countries = Array.from(checked).map(c => c.value);
+
+        if (countries.length === 0) {
+            grid.innerHTML = '<p class="hint">Select a country first</p>';
+            return;
+        }
+
+        let html = '';
+        for (const country of countries) {
+            const data = locationsData[country];
+            if (data && data.cities) {
+                html += `<div class="city-group"><strong>${country}</strong></div>`;
+                for (const city of data.cities) {
+                    html += `<label class="checkbox-label">
+                        <input type="checkbox" name="cities" value="${city}"> ${city}
+                    </label>`;
+                }
+            }
+        }
+        grid.innerHTML = html;
+    }
+</script>
+{% endblock %}

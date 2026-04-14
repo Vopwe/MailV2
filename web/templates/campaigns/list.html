@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% block title %}Campaigns — Email Extractor{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Campaigns</h1>
+    <a href="/campaigns/new" class="btn btn-primary">+ New Campaign</a>
+</div>
+
+{% if campaigns %}
+<div class="campaign-filters">
+    <input type="text" id="campaign-search" placeholder="Search campaigns..." oninput="filterCampaigns()">
+    <select id="campaign-status-filter" onchange="filterCampaigns()">
+        <option value="">All Statuses</option>
+        <option value="pending">Pending</option>
+        <option value="generating">Generating</option>
+        <option value="crawling">Crawling</option>
+        <option value="done">Done</option>
+        <option value="failed">Failed</option>
+    </select>
+</div>
+
+<table class="table" id="campaigns-table">
+    <thead>
+        <tr>
+            <th>Name</th>
+            <th>Niches</th>
+            <th>Countries</th>
+            <th>Status</th>
+            <th>URLs</th>
+            <th>Emails</th>
+            <th>Created</th>
+            <th>Actions</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for c in campaigns %}
+        <tr data-name="{{ c.name|lower }}" data-status="{{ c.status }}">
+            <td><a href="/campaigns/{{ c.id }}">{{ c.name }}</a></td>
+            <td>{{ c.niches | join(', ') }}</td>
+            <td>{{ c.countries | join(', ') }}</td>
+            <td><span class="badge badge-{{ c.status }}">{{ c.status }}</span></td>
+            <td>{{ c.total_urls }}</td>
+            <td>{{ c.total_emails }}</td>
+            <td>{{ c.created_at[:10] }}</td>
+            <td class="actions">
+                <a href="/campaigns/{{ c.id }}" class="btn btn-sm">View</a>
+                <form method="post" action="/campaigns/{{ c.id }}/delete" class="inline-form"
+                      onsubmit="return confirm('Delete this campaign and all its data?')">
+                    <button type="submit" class="btn btn-sm btn-danger">Delete</button>
+                </form>
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p class="empty-state">No campaigns yet. <a href="/campaigns/new">Create your first campaign</a> to get started.</p>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+function filterCampaigns() {
+    const search = document.getElementById('campaign-search').value.toLowerCase();
+    const status = document.getElementById('campaign-status-filter').value;
+    document.querySelectorAll('#campaigns-table tbody tr').forEach(row => {
+        const nameMatch = !search || row.dataset.name.includes(search);
+        const statusMatch = !status || row.dataset.status === status;
+        row.style.display = nameMatch && statusMatch ? '' : 'none';
+    });
+}
+</script>
+{% endblock %}

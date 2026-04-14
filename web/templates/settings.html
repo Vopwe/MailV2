@@ -1,0 +1,219 @@
+{% extends "base.html" %}
+{% block title %}Settings — GraphenMail V2{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Settings</h1>
+</div>
+
+<form method="post" class="form-card">
+    <div class="settings-tabs">
+        <button type="button" class="settings-tab active" data-tab="bing">Bing Scraper</button>
+        <button type="button" class="settings-tab" data-tab="ips">IP Rotation</button>
+        <button type="button" class="settings-tab" data-tab="crawl">Crawl</button>
+        <button type="button" class="settings-tab" data-tab="verify">Verification</button>
+        <button type="button" class="settings-tab" data-tab="security">Security</button>
+    </div>
+
+    <div class="settings-panel active" id="tab-bing">
+        <h2>Bing Scraper</h2>
+        <div class="form-row">
+            <div class="form-group">
+                <label for="bing_concurrency">Parallel Bing Scrapes</label>
+                <input type="number" id="bing_concurrency" name="bing_concurrency"
+                       value="{{ settings.bing_concurrency }}" min="1" max="20">
+                <span class="hint">How many Bing queries run simultaneously. Keep low to avoid bans.</span>
+            </div>
+            <div class="form-group">
+                <label for="urls_per_batch">URLs per Niche/City Combo</label>
+                <input type="number" id="urls_per_batch" name="urls_per_batch"
+                       value="{{ settings.urls_per_batch }}" min="5" max="100">
+                <span class="hint">Max unique URLs to scrape from Bing per niche/city combination.</span>
+            </div>
+        </div>
+        <div class="form-row">
+            <div class="form-group">
+                <label for="bing_delay_min">Min Delay Between Requests (sec)</label>
+                <input type="number" id="bing_delay_min" name="bing_delay_min"
+                       value="{{ settings.bing_delay_min }}" min="0.5" max="30" step="0.5">
+                <span class="hint">Minimum random delay between Bing page fetches.</span>
+            </div>
+            <div class="form-group">
+                <label for="bing_delay_max">Max Delay Between Requests (sec)</label>
+                <input type="number" id="bing_delay_max" name="bing_delay_max"
+                       value="{{ settings.bing_delay_max }}" min="1" max="60" step="0.5">
+                <span class="hint">Maximum random delay. Higher = safer, slower.</span>
+            </div>
+        </div>
+        <div class="form-row">
+            <div class="form-group">
+                <label for="bing_results_per_page">Bing Results per Page</label>
+                <input type="number" id="bing_results_per_page" name="bing_results_per_page"
+                       value="{{ settings.bing_results_per_page }}" min="10" max="50" step="10">
+                <span class="hint">Bing's count parameter. 50 max — fewer pages needed.</span>
+            </div>
+            <div class="form-group"></div>
+        </div>
+    </div>
+
+    <div class="settings-panel" id="tab-ips">
+        <h2>IP Rotation</h2>
+        <div class="form-row">
+            <div class="form-group" style="flex: 1 1 100%;">
+                <label for="outbound_ips">Outbound IP Addresses</label>
+                <textarea id="outbound_ips" name="outbound_ips" rows="10"
+                          placeholder="Enter one IP per line (IPv4 or IPv6)&#10;&#10;Example:&#10;192.168.1.100&#10;192.168.1.101&#10;2001:db8::1&#10;&#10;Leave empty to use default system IP.">{% if settings.outbound_ips %}{% for ip in settings.outbound_ips %}{{ ip }}{% if not loop.last %}
+{% endif %}{% endfor %}{% endif %}</textarea>
+                <span class="hint">
+                    One IP per line. Supports IPv4 and IPv6. IPs will be rotated round-robin for Bing requests.
+                    Leave empty to use the server's default IP.
+                    You can also create an <code>ips.txt</code> file in the project root instead.
+                </span>
+            </div>
+        </div>
+        {% if ip_status %}
+        <div class="form-row">
+            <div class="form-group">
+                <label>Status</label>
+                <div class="ip-status-grid">
+                    <div class="stat-mini">
+                        <span class="stat-label">Total IPs</span>
+                        <span class="stat-value">{{ ip_status.total_ips }}</span>
+                    </div>
+                    <div class="stat-mini">
+                        <span class="stat-label">Available</span>
+                        <span class="stat-value" style="color: var(--success);">{{ ip_status.available_ips }}</span>
+                    </div>
+                    <div class="stat-mini">
+                        <span class="stat-label">On Cooldown</span>
+                        <span class="stat-value" style="color: var(--warning);">{{ ip_status.cooled_down_ips }}</span>
+                    </div>
+                </div>
+                {% if ip_status.cooldown_list %}
+                <span class="hint" style="color: var(--warning);">
+                    Cooled down: {{ ip_status.cooldown_list | join(', ') }}
+                </span>
+                {% endif %}
+            </div>
+        </div>
+        {% endif %}
+    </div>
+
+    <div class="settings-panel" id="tab-crawl">
+        <h2>Crawl Settings</h2>
+        <div class="form-row">
+            <div class="form-group">
+                <label for="max_concurrent_requests">Parallel Crawl Connections</label>
+                <input type="number" id="max_concurrent_requests" name="max_concurrent_requests"
+                       value="{{ settings.max_concurrent_requests }}" min="1" max="100">
+                <span class="hint">Domains crawled in parallel. Higher = faster but may trigger rate limits.</span>
+            </div>
+            <div class="form-group">
+                <label for="crawl_delay">Crawl Delay (seconds)</label>
+                <input type="number" id="crawl_delay" name="crawl_delay"
+                       value="{{ settings.crawl_delay }}" min="0" max="5" step="0.1">
+                <span class="hint">Wait time between sub-page requests on the same domain.</span>
+            </div>
+        </div>
+        <div class="form-row">
+            <div class="form-group">
+                <label for="request_timeout">Request Timeout (seconds)</label>
+                <input type="number" id="request_timeout" name="request_timeout"
+                       value="{{ settings.request_timeout }}" min="3" max="60">
+                <span class="hint">Max wait per page fetch before giving up.</span>
+            </div>
+            <div class="form-group">
+                <label for="max_pages_per_domain">Max Pages per Domain</label>
+                <input type="number" id="max_pages_per_domain" name="max_pages_per_domain"
+                       value="{{ settings.max_pages_per_domain }}" min="1" max="20">
+                <span class="hint">Sub-pages to scan per domain.</span>
+            </div>
+        </div>
+        <div class="form-row">
+            <div class="form-group">
+                <label for="robots_txt_mode">robots.txt Mode</label>
+                <select id="robots_txt_mode" name="robots_txt_mode">
+                    <option value="off" {% if settings.robots_txt_mode == 'off' %}selected{% endif %}>Off — Ignore robots.txt entirely</option>
+                    <option value="soft" {% if settings.get('robots_txt_mode', 'soft') == 'soft' %}selected{% endif %}>Soft — Only block admin/private paths (recommended)</option>
+                    <option value="strict" {% if settings.robots_txt_mode == 'strict' %}selected{% endif %}>Strict — Block everything robots.txt says</option>
+                </select>
+                <span class="hint">Soft mode crawls contact/about pages even if blocked.</span>
+            </div>
+            <div class="form-group"></div>
+        </div>
+    </div>
+
+    <div class="settings-panel" id="tab-verify">
+        <h2>Verification</h2>
+        <div class="form-row">
+            <div class="form-group">
+                <label for="verify_concurrency">Parallel Verifications</label>
+                <input type="number" id="verify_concurrency" name="verify_concurrency"
+                       value="{{ settings.verify_concurrency }}" min="1" max="100">
+                <span class="hint">SMTP checks running simultaneously. 30 is a good default.</span>
+            </div>
+            <div class="form-group">
+                <label for="verify_timeout">Verification Timeout (seconds)</label>
+                <input type="number" id="verify_timeout" name="verify_timeout"
+                       value="{{ settings.verify_timeout }}" min="3" max="30">
+                <span class="hint">Max wait for SMTP verification per email.</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="settings-panel" id="tab-security">
+        <h2>Password Protection</h2>
+        {% if has_password %}
+        <div class="form-row">
+            <div class="form-group">
+                <label for="current_password">Current Password</label>
+                <input type="password" id="current_password" name="current_password" placeholder="Enter current password">
+                <span class="hint">Required to change password.</span>
+            </div>
+            <div class="form-group">
+                <label for="new_password">New Password</label>
+                <input type="password" id="new_password" name="new_password" placeholder="Leave empty to keep current">
+                <span class="hint">Leave blank to keep existing password.</span>
+            </div>
+        </div>
+        <div class="form-row">
+            <div class="form-group">
+                <label>
+                    <input type="checkbox" name="remove_password" value="1" style="width:auto; margin-right:6px;">
+                    Remove password protection
+                </label>
+                <span class="hint">Unprotects the app — anyone with the URL can access it.</span>
+            </div>
+            <div class="form-group"></div>
+        </div>
+        {% else %}
+        <div class="form-row">
+            <div class="form-group">
+                <label for="new_password">Set Password</label>
+                <input type="password" id="new_password" name="new_password" placeholder="Enter a password to protect the app">
+                <span class="hint">Optional. Protects the app with a login screen.</span>
+            </div>
+            <div class="form-group"></div>
+        </div>
+        {% endif %}
+    </div>
+
+    <div class="form-actions">
+        <button type="submit" class="btn btn-primary">Save Settings</button>
+    </div>
+</form>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.querySelectorAll('.settings-tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+        document.querySelectorAll('.settings-tab').forEach(t => t.classList.remove('active'));
+        document.querySelectorAll('.settings-panel').forEach(p => p.classList.remove('active'));
+        tab.classList.add('active');
+        document.getElementById('tab-' + tab.dataset.tab).classList.add('active');
+    });
+});
+</script>
+{% endblock %}

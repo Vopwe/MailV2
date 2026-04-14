@@ -1,0 +1,147 @@
+{% extends "base.html" %}
+{% block title %}Dashboard — GraphenMail{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Dashboard</h1>
+    <a href="/campaigns/new" class="btn btn-primary">+ New Campaign</a>
+</div>
+
+<div class="stats-grid">
+    <div class="stat-card">
+        <div class="stat-number">{{ stats.total_campaigns }}</div>
+        <div class="stat-label">Total Campaigns</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-number">{{ stats.active_campaigns }}</div>
+        <div class="stat-label">Active</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-number">{{ stats.total_emails }}</div>
+        <div class="stat-label">Emails Extracted</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-number">{{ stats.verified_emails }}</div>
+        <div class="stat-label">Verified Valid</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-number">{{ stats.invalid_emails }}</div>
+        <div class="stat-label">Invalid</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-number">{{ stats.total_urls }}</div>
+        <div class="stat-label">URLs Crawled</div>
+    </div>
+</div>
+
+<!-- ─── Charts ──────────────────────────────────────────── -->
+<div class="charts-grid">
+    <div class="chart-card">
+        <h3>Verification Status</h3>
+        <canvas id="verificationChart" height="220"></canvas>
+    </div>
+    <div class="chart-card">
+        <h3>Emails by Campaign</h3>
+        <canvas id="campaignChart" height="220"></canvas>
+    </div>
+    <div class="chart-card">
+        <h3>Top Niches</h3>
+        <canvas id="nicheChart" height="220"></canvas>
+    </div>
+    <div class="chart-card">
+        <h3>Emails by Country</h3>
+        <canvas id="countryChart" height="220"></canvas>
+    </div>
+</div>
+
+{% if not stats.total_campaigns %}
+<p class="empty-state">No campaigns yet. <a href="/campaigns/new">Create your first campaign</a> to get started.</p>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+<script>
+(function() {
+    const data = {{ chart_data_json | safe }};
+
+    const COLORS = {
+        valid: '#22C55E', invalid: '#EF4444', risky: '#F59E0B',
+        unknown: '#94A3B8', unverified: '#CBD5E1', spam_trap: '#991B1B'
+    };
+    const BAR_PALETTE = [
+        '#F97316','#3B82F6','#22C55E','#EF4444','#8B5CF6',
+        '#EC4899','#14B8A6','#F59E0B','#6366F1','#06B6D4'
+    ];
+
+    Chart.defaults.font.family = "'Montserrat', sans-serif";
+    Chart.defaults.font.size = 12;
+    Chart.defaults.plugins.legend.labels.boxWidth = 12;
+
+    function showEmpty(canvasId, msg) {
+        const canvas = document.getElementById(canvasId);
+        const ctx = canvas.getContext('2d');
+        ctx.font = '13px Montserrat, sans-serif';
+        ctx.fillStyle = '#94A3B8';
+        ctx.textAlign = 'center';
+        ctx.fillText(msg, canvas.width / 2, canvas.height / 2);
+    }
+
+    // Verification donut
+    const vLabels = Object.keys(data.verification);
+    const vData = Object.values(data.verification);
+    if (vLabels.length) {
+        new Chart(document.getElementById('verificationChart'), {
+            type: 'doughnut',
+            data: {
+                labels: vLabels.map(l => l.charAt(0).toUpperCase() + l.slice(1)),
+                datasets: [{ data: vData, backgroundColor: vLabels.map(l => COLORS[l] || '#94A3B8'), borderWidth: 0 }]
+            },
+            options: { responsive: true, plugins: { legend: { position: 'bottom' } } }
+        });
+    } else { showEmpty('verificationChart', 'No verification data yet'); }
+
+    // Campaign bar
+    const cLabels = Object.keys(data.campaigns);
+    const cData = Object.values(data.campaigns);
+    if (cLabels.length) {
+        new Chart(document.getElementById('campaignChart'), {
+            type: 'bar',
+            data: {
+                labels: cLabels.map(l => l.length > 18 ? l.slice(0,18) + '…' : l),
+                datasets: [{ label: 'Emails', data: cData, backgroundColor: '#F97316', borderRadius: 3 }]
+            },
+            options: { responsive: true, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true } } }
+        });
+    } else { showEmpty('campaignChart', 'No campaign data yet'); }
+
+    // Niche bar
+    const nLabels = Object.keys(data.niches);
+    const nData = Object.values(data.niches);
+    if (nLabels.length) {
+        new Chart(document.getElementById('nicheChart'), {
+            type: 'bar',
+            data: {
+                labels: nLabels,
+                datasets: [{ label: 'Emails', data: nData, backgroundColor: BAR_PALETTE.slice(0, nLabels.length), borderRadius: 3 }]
+            },
+            options: { indexAxis: 'y', responsive: true, plugins: { legend: { display: false } }, scales: { x: { beginAtZero: true } } }
+        });
+    } else { showEmpty('nicheChart', 'No niche data yet'); }
+
+    // Country bar
+    const coLabels = Object.keys(data.countries);
+    const coData = Object.values(data.countries);
+    if (coLabels.length) {
+        new Chart(document.getElementById('countryChart'), {
+            type: 'bar',
+            data: {
+                labels: coLabels,
+                datasets: [{ label: 'Emails', data: coData, backgroundColor: '#3B82F6', borderRadius: 3 }]
+            },
+            options: { responsive: true, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true } } }
+        });
+    } else { showEmpty('countryChart', 'No country data yet'); }
+})();
+</script>
+{% endblock %}

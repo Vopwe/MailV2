@@ -1,0 +1,280 @@
+{% extends "base.html" %}
+{% block title %}Database — GraphenMail{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div>
+        <h1>Database <span class="count">({{ total }})</span></h1>
+        {% if filters.get('campaign_id') %}
+        <a href="/campaigns/{{ filters.get('campaign_id') }}" class="btn btn-sm" style="margin-top: 4px;">&larr; Back to Campaign</a>
+        {% endif %}
+    </div>
+    <div class="header-actions">
+        <button type="button" class="btn btn-secondary" id="export-btn" onclick="doExport()">Export CSV</button>
+    </div>
+</div>
+
+<div class="filters-bar">
+    <form method="get" class="filters-form" id="filters-form">
+        <select name="campaign_id">
+            <option value="">All Campaigns</option>
+            {% for c in campaigns %}
+            <option value="{{ c.id }}" {% if filters.get('campaign_id') == c.id|string %}selected{% endif %}>
+                {{ c.name }}
+            </option>
+            {% endfor %}
+        </select>
+
+        <select name="niche">
+            <option value="">All Niches</option>
+            {% for n in niches %}
+            <option value="{{ n }}" {% if filters.get('niche') == n %}selected{% endif %}>{{ n }}</option>
+            {% endfor %}
+        </select>
+
+        <select name="country">
+            <option value="">All Countries</option>
+            {% for co in countries %}
+            <option value="{{ co }}" {% if filters.get('country') == co %}selected{% endif %}>{{ co }}</option>
+            {% endfor %}
+        </select>
+
+        <select name="city">
+            <option value="">All Cities</option>
+            {% for ci in cities %}
+            <option value="{{ ci }}" {% if filters.get('city') == ci %}selected{% endif %}>{{ ci }}</option>
+            {% endfor %}
+        </select>
+
+        <select name="verification">
+            <option value="">All Status</option>
+            <option value="unverified" {% if filters.get('verification') == 'unverified' %}selected{% endif %}>Unverified</option>
+            <option value="valid" {% if filters.get('verification') == 'valid' %}selected{% endif %}>Valid</option>
+            <option value="invalid" {% if filters.get('verification') == 'invalid' %}selected{% endif %}>Invalid</option>
+            <option value="risky" {% if filters.get('verification') == 'risky' %}selected{% endif %}>Risky</option>
+            <option value="spam_trap" {% if filters.get('verification') == 'spam_trap' %}selected{% endif %}>Spam Trap</option>
+            <option value="unknown" {% if filters.get('verification') == 'unknown' %}selected{% endif %}>Unknown</option>
+        </select>
+
+        <input type="text" name="search" value="{{ filters.get('search', '') }}" placeholder="Search emails...">
+
+        <button type="submit" class="btn btn-primary">Filter</button>
+        <a href="/emails" class="btn btn-secondary">Clear</a>
+    </form>
+</div>
+
+<!-- Clean Up -->
+<details class="export-panel">
+    <summary class="export-panel-toggle">Clean Up <span class="toggle-arrow">&#9662;</span></summary>
+    <div class="export-panel-body">
+        <form method="post" action="/verification/bulk-delete" class="verify-action-row"
+              onsubmit="return confirm('Permanently delete all emails with selected statuses?')">
+            <label class="checkbox-label"><input type="checkbox" name="statuses" value="invalid"> Invalid</label>
+            <label class="checkbox-label"><input type="checkbox" name="statuses" value="spam_trap"> Spam Traps</label>
+            <label class="checkbox-label"><input type="checkbox" name="statuses" value="unknown"> Unknown</label>
+            <button type="submit" class="btn btn-danger btn-sm">Delete Selected</button>
+        </form>
+    </div>
+</details>
+
+<!-- Export Options -->
+<details class="export-panel">
+    <summary class="export-panel-toggle">Export Settings <span class="toggle-arrow">&#9662;</span></summary>
+    <div class="export-panel-body">
+        <div class="verify-health-grid">
+            <div class="verify-health-card">
+                <h3>Columns to Include</h3>
+                <div class="export-checks-grid">
+                    <div class="export-check-group">
+                        <span class="export-group-label">Core</span>
+                        <label class="checkbox-label"><input type="checkbox" class="export-col" value="email" checked disabled> Email</label>
+                        <label class="checkbox-label"><input type="checkbox" class="export-col" value="domain" checked> Domain</label>
+                        <label class="checkbox-label"><input type="checkbox" class="export-col" value="source_url" checked> Source URL</label>
+                    </div>
+                    <div class="export-check-group">
+                        <span class="export-group-label">Location</span>
+                        <label class="checkbox-label"><input type="checkbox" class="export-col" value="niche" checked> Niche</label>
+                        <label class="checkbox-label"><input type="checkbox" class="export-col" value="city" checked> City</label>
+                        <label class="checkbox-label"><input type="checkbox" class="export-col" value="country" checked> Country</label>
+                    </div>
+                    <div class="export-check-group">
+                        <span class="export-group-label">Verification</span>
+                        <label class="checkbox-label"><input type="checkbox" class="export-col" value="verification" checked> Status</label>
+                        <label class="checkbox-label"><input type="checkbox" class="export-col" value="verification_method"> Method</label>
+                        <label class="checkbox-label"><input type="checkbox" class="export-col" value="mailbox_confidence"> Mailbox Conf.</label>
+                        <label class="checkbox-label"><input type="checkbox" class="export-col" value="domain_confidence"> Domain Conf.</label>
+                    </div>
+                    <div class="export-check-group">
+                        <span class="export-group-label">Technical</span>
+                        <label class="checkbox-label"><input type="checkbox" class="export-col" value="is_catch_all"> Catch-All</label>
+                        <label class="checkbox-label"><input type="checkbox" class="export-col" value="mx_valid"> MX Valid</label>
+                        <label class="checkbox-label"><input type="checkbox" class="export-col" value="smtp_valid"> SMTP Valid</label>
+                        <label class="checkbox-label"><input type="checkbox" class="export-col" value="extracted_at"> Date</label>
+                    </div>
+                </div>
+            </div>
+            <div class="verify-health-card">
+                <h3>Exclude Providers</h3>
+                <p class="verify-meta" style="margin-bottom: 10px;">Remove free/public email providers from export</p>
+                <div class="export-checks-grid">
+                    <div class="export-check-group">
+                        <label class="checkbox-label"><input type="checkbox" class="exclude-provider" value="gmail.com,googlemail.com"> Gmail</label>
+                        <label class="checkbox-label"><input type="checkbox" class="exclude-provider" value="outlook.com,hotmail.com,hotmail.co.uk,live.com,msn.com"> Outlook / Hotmail</label>
+                        <label class="checkbox-label"><input type="checkbox" class="exclude-provider" value="yahoo.com,yahoo.co.uk,ymail.com,rocketmail.com"> Yahoo</label>
+                    </div>
+                    <div class="export-check-group">
+                        <label class="checkbox-label"><input type="checkbox" class="exclude-provider" value="aol.com,aol.co.uk"> AOL</label>
+                        <label class="checkbox-label"><input type="checkbox" class="exclude-provider" value="icloud.com,me.com,mac.com"> iCloud</label>
+                        <label class="checkbox-label"><input type="checkbox" class="exclude-provider" value="protonmail.com,proton.me,pm.me"> Proton</label>
+                    </div>
+                </div>
+                <div style="margin-top: 12px;">
+                    <button type="button" class="btn btn-sm" id="exclude-all-btn">Select All</button>
+                    <button type="button" class="btn btn-sm" id="exclude-none-btn" style="margin-left: 4px;">Clear All</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</details>
+
+<!-- Inline verification progress -->
+<div class="verify-progress" id="verify-progress" data-task-id="{{ request.args.get('verification_task', '') }}" style="display: none;">
+    <div class="progress-bar-container">
+        <div class="progress-bar" id="progress-bar" style="width: 0%"></div>
+    </div>
+    <p class="progress-text" id="progress-text">Verifying...</p>
+</div>
+
+<form method="post" action="/verification" id="verify-form">
+    <input type="hidden" name="action" value="verify_selected">
+    <input type="hidden" name="redirect_to" value="/emails?{{ request.query_string.decode() }}">
+
+    {% if emails %}
+    <div class="table-actions">
+        <label class="checkbox-label">
+            <input type="checkbox" id="select-all" onchange="toggleAll(this)"> Select All
+        </label>
+        <button type="submit" class="btn btn-sm btn-primary">Verify Selected</button>
+    </div>
+
+    <table class="table table-compact">
+        <thead>
+            <tr>
+                <th class="col-check"><input type="checkbox" onchange="toggleAll(this)"></th>
+                <th>Email</th>
+                {% if not filters.get('campaign_id') %}<th>Campaign</th>{% endif %}
+                <th>Niche</th>
+                <th>Location</th>
+                <th>Status</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for e in emails %}
+            <tr>
+                <td class="col-check"><input type="checkbox" name="email_ids" value="{{ e.id }}"></td>
+                <td>
+                    <span class="email-primary">{{ e.email }}</span>
+                    <span class="email-meta">{{ e.source_domain }}</span>
+                </td>
+                {% if not filters.get('campaign_id') %}<td>{{ e.campaign_name or '-' }}</td>{% endif %}
+                <td>{{ e.niche or '-' }}</td>
+                <td>{{ e.city or '' }}{% if e.city and e.country %}, {% endif %}{{ e.country or '-' }}</td>
+                <td>
+                    <span class="badge badge-{{ e.verification }}">{{ e.verification }}</span>
+                    {% if e.verification_method and e.verification_method != 'pending' %}
+                    <span class="email-meta">
+                        {{ e.verification_method }}
+                        {% if e.mailbox_confidence and e.mailbox_confidence != 'unknown' %} · mailbox {{ e.mailbox_confidence }}{% endif %}
+                        {% if e.domain_confidence and e.domain_confidence != 'unknown' %} · domain {{ e.domain_confidence }}{% endif %}
+                        {% if e.is_catch_all %} · catch-all{% endif %}
+                    </span>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    {% if total_pages > 1 %}
+    <div class="pagination">
+        {% if prev_url %}
+        <a href="{{ prev_url }}" class="btn btn-sm">&laquo; Prev</a>
+        {% endif %}
+        <span class="page-info">Page {{ page }} of {{ total_pages }}</span>
+        {% if next_url %}
+        <a href="{{ next_url }}" class="btn btn-sm">Next &raquo;</a>
+        {% endif %}
+    </div>
+    {% endif %}
+
+    {% else %}
+    <p class="empty-state">No emails found. Run a campaign first or adjust your filters.</p>
+    {% endif %}
+</form>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function toggleAll(source) {
+    const checkboxes = document.querySelectorAll('input[name="email_ids"]');
+    checkboxes.forEach(cb => cb.checked = source.checked);
+}
+
+function doExport() {
+    const cols = [];
+    document.querySelectorAll('.export-col:checked').forEach(cb => cols.push(cb.value));
+    if (!cols.includes('email')) cols.unshift('email');
+
+    const excludeDomains = [];
+    document.querySelectorAll('.exclude-provider:checked').forEach(cb => {
+        excludeDomains.push(...cb.value.split(','));
+    });
+
+    const params = new URLSearchParams(window.location.search);
+    params.set('columns', cols.join(','));
+    if (excludeDomains.length > 0) {
+        params.set('exclude_providers', excludeDomains.join(','));
+    }
+
+    const url = '/emails/export?' + params.toString();
+    fetch(url)
+        .then(r => r.blob())
+        .then(blob => {
+            // Count rows (lines minus header)
+            blob.text().then(text => {
+                const count = text.trim().split('\n').length - 1;
+                showExportToast(count);
+            });
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = 'emails_export.csv';
+            a.click();
+            URL.revokeObjectURL(a.href);
+        });
+}
+
+// Exclude provider select/clear all
+document.getElementById('exclude-all-btn')?.addEventListener('click', () => {
+    document.querySelectorAll('.exclude-provider').forEach(cb => cb.checked = true);
+});
+document.getElementById('exclude-none-btn')?.addEventListener('click', () => {
+    document.querySelectorAll('.exclude-provider').forEach(cb => cb.checked = false);
+});
+
+pollVerificationTask();
+
+// Export with feedback toast
+function showExportToast(count) {
+    let toast = document.getElementById('export-toast');
+    if (!toast) {
+        toast = document.createElement('div');
+        toast.id = 'export-toast';
+        toast.className = 'export-toast';
+        document.body.appendChild(toast);
+    }
+    toast.textContent = `Exported ${count} emails to CSV`;
+    toast.classList.add('visible');
+    setTimeout(() => toast.classList.remove('visible'), 4000);
+}
+</script>
+{% endblock %}

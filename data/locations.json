@@ -1,0 +1,128 @@
+{
+  "USA": {
+    "code": "US",
+    "tld": ".com",
+    "cities": [
+      "New York", "Los Angeles", "Chicago", "Houston", "Phoenix",
+      "Philadelphia", "San Antonio", "San Diego", "Dallas", "San Jose",
+      "Austin", "Jacksonville", "Fort Worth", "Columbus", "Charlotte",
+      "Indianapolis", "San Francisco", "Seattle", "Denver", "Nashville",
+      "Oklahoma City", "El Paso", "Washington DC", "Boston", "Las Vegas",
+      "Portland", "Memphis", "Louisville", "Baltimore", "Milwaukee",
+      "Albuquerque", "Tucson", "Fresno", "Sacramento", "Mesa",
+      "Kansas City", "Atlanta", "Omaha", "Colorado Springs", "Raleigh",
+      "Long Beach", "Virginia Beach", "Miami", "Oakland", "Minneapolis",
+      "Tampa", "Tulsa", "Arlington", "New Orleans", "Cleveland",
+      "Honolulu", "Anaheim", "Lexington", "Stockton", "Corpus Christi",
+      "Pittsburgh", "Cincinnati", "Saint Paul", "Greensboro", "Anchorage",
+      "Plano", "Lincoln", "Orlando", "Irvine", "Newark",
+      "Durham", "Chula Vista", "Toledo", "Fort Wayne", "St. Petersburg",
+      "Laredo", "Jersey City", "Chandler", "Madison", "Lubbock",
+      "Scottsdale", "Reno", "Buffalo", "Gilbert", "Glendale",
+      "North Las Vegas", "Winston-Salem", "Chesapeake", "Norfolk", "Fremont",
+      "Garland", "Irving", "Hialeah", "Richmond", "Boise",
+      "Spokane", "Baton Rouge", "Tacoma", "San Bernardino", "Modesto",
+      "Fontana", "Des Moines", "Moreno Valley", "Santa Clarita", "Fayetteville"
+    ]
+  },
+  "Canada": {
+    "code": "CA",
+    "tld": ".ca",
+    "cities": [
+      "Toronto", "Montreal", "Vancouver", "Calgary", "Edmonton",
+      "Ottawa", "Winnipeg", "Quebec City", "Hamilton", "Kitchener",
+      "London", "Victoria", "Halifax", "Oshawa", "Windsor",
+      "Saskatoon", "Regina", "St. Catharines", "Kelowna", "Barrie",
+      "Sherbrooke", "Guelph", "Kanata", "Abbotsford", "Trois-Rivières",
+      "Kingston", "Milton", "Thunder Bay", "St. John's", "Moncton",
+      "Nanaimo", "Sudbury", "Brantford", "Fredericton", "Red Deer",
+      "Lethbridge", "Kamloops", "Prince George", "Medicine Hat", "Drummondville",
+      "Saint John", "Chilliwack", "Chatham-Kent", "Maple Ridge", "North Bay",
+      "Cape Breton", "Sault Ste. Marie", "Sarnia", "Courtenay", "Belleville"
+    ]
+  },
+  "United Kingdom": {
+    "code": "GB",
+    "tld": ".co.uk",
+    "cities": [
+      "London", "Birmingham", "Manchester", "Leeds", "Glasgow",
+      "Liverpool", "Newcastle", "Sheffield", "Bristol", "Edinburgh",
+      "Leicester", "Coventry", "Bradford", "Cardiff", "Belfast",
+      "Nottingham", "Kingston upon Hull", "Stoke-on-Trent", "Wolverhampton", "Derby",
+      "Swansea", "Southampton", "Plymouth", "Reading", "Luton",
+      "Aberdeen", "Northampton", "Sunderland", "Norwich", "Bournemouth",
+      "Swindon", "Dundee", "Huddersfield", "Oxford", "Poole",
+      "Middlesbrough", "Blackpool", "Bolton", "Ipswich", "York",
+      "Brighton", "Cambridge", "Exeter", "Gloucester", "Cheltenham",
+      "Bath", "Chester", "Canterbury", "Worcester", "Inverness"
+    ]
+  },
+  "Australia": {
+    "code": "AU",
+    "tld": ".com.au",
+    "cities": [
+      "Sydney", "Melbourne", "Brisbane", "Perth", "Adelaide",
+      "Gold Coast", "Canberra", "Newcastle", "Wollongong", "Sunshine Coast",
+      "Hobart", "Geelong", "Townsville", "Cairns", "Darwin",
+      "Toowoomba", "Ballarat", "Bendigo", "Launceston", "Mackay",
+      "Rockhampton", "Bunbury", "Bundaberg", "Hervey Bay", "Wagga Wagga",
+      "Coffs Harbour", "Gladstone", "Mildura", "Shepparton", "Tamworth",
+      "Port Macquarie", "Orange", "Dubbo", "Geraldton", "Nowra",
+      "Bathurst", "Warrnambool", "Albany", "Mount Gambier", "Lismore",
+      "Alice Springs", "Kalgoorlie", "Devonport", "Burnie", "Broken Hill",
+      "Whyalla", "Murray Bridge", "Gawler", "Mount Isa", "Emerald"
+    ]
+  },
+  "France": {
+    "code": "FR",
+    "tld": ".fr",
+    "cities": [
+      "Paris", "Marseille", "Lyon", "Toulouse", "Nice",
+      "Nantes", "Strasbourg", "Montpellier", "Bordeaux", "Lille",
+      "Rennes", "Reims", "Saint-Étienne", "Le Havre", "Toulon",
+      "Grenoble", "Dijon", "Angers", "Nîmes", "Villeurbanne",
+      "Clermont-Ferrand", "Le Mans", "Aix-en-Provence", "Brest", "Tours",
+      "Amiens", "Limoges", "Annecy", "Perpignan", "Boulogne-Billancourt",
+      "Metz", "Besançon", "Orléans", "Rouen", "Mulhouse",
+      "Caen", "Nancy", "Argenteuil", "Saint-Denis", "Montreuil",
+      "Roubaix", "Tourcoing", "Avignon", "Dunkerque", "Poitiers",
+      "Versailles", "Pau", "La Rochelle", "Calais", "Cannes"
+    ]
+  },
+  "Germany": {
+    "code": "DE",
+    "tld": ".de",
+    "cities": [
+      "Berlin", "Hamburg", "Munich", "Cologne", "Frankfurt",
+      "Stuttgart", "Düsseldorf", "Leipzig", "Dortmund", "Essen",
+      "Bremen", "Dresden", "Hanover", "Nuremberg", "Duisburg",
+      "Bochum", "Wuppertal", "Bielefeld", "Bonn", "Münster",
+      "Mannheim", "Karlsruhe", "Augsburg", "Wiesbaden", "Mönchengladbach",
+      "Gelsenkirchen", "Aachen", "Braunschweig", "Kiel", "Chemnitz",
+      "Halle", "Magdeburg", "Freiburg", "Krefeld", "Mainz",
+      "Lübeck", "Erfurt", "Oberhausen", "Rostock", "Kassel",
+      "Hagen", "Potsdam", "Saarbrücken", "Hamm", "Ludwigshafen",
+      "Oldenburg", "Osnabrück", "Heidelberg", "Darmstadt", "Regensburg"
+    ]
+  },
+  "South Africa": {
+    "code": "ZA",
+    "tld": ".co.za",
+    "cities": [
+      "Johannesburg", "Cape Town", "Durban", "Pretoria", "Port Elizabeth",
+      "Bloemfontein", "East London", "Nelspruit", "Kimberley", "Polokwane",
+      "Pietermaritzburg", "Rustenburg", "George", "Stellenbosch", "Richards Bay",
+      "Witbank", "Vanderbijlpark", "Centurion", "Midrand", "Sandton"
+    ]
+  },
+  "Nigeria": {
+    "code": "NG",
+    "tld": ".ng",
+    "cities": [
+      "Lagos", "Abuja", "Kano", "Ibadan", "Port Harcourt",
+      "Benin City", "Kaduna", "Enugu", "Calabar", "Uyo",
+      "Warri", "Aba", "Jos", "Ilorin", "Owerri",
+      "Abeokuta", "Akure", "Onitsha", "Sokoto", "Maiduguri"
+    ]
+  }
+}

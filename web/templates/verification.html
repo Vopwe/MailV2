@@ -1,0 +1,265 @@
+{% extends "base.html" %}
+{% block title %}Verification — GraphenMail{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Email Verification</h1>
+</div>
+
+<div class="stats-grid stats-grid-sm">
+    <div class="stat-card">
+        <div class="stat-number">{{ stats.unverified_emails|default(0) }}</div>
+        <div class="stat-label">Unverified</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-number">{{ stats.verified_emails|default(0) }}</div>
+        <div class="stat-label">Valid</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-number">{{ stats.invalid_emails|default(0) }}</div>
+        <div class="stat-label">Invalid</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-number">{{ stats.risky_emails|default(0) }}</div>
+        <div class="stat-label">Risky</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-number stat-danger">{{ stats.spam_trap_emails|default(0) }}</div>
+        <div class="stat-label">Spam Traps</div>
+    </div>
+</div>
+
+<!-- Progress bar: ALWAYS visible -->
+<div class="section verify-progress" id="verify-progress" data-task-id="{{ task_id or '' }}" data-always-visible="true">
+    <h2>Verification Progress</h2>
+    <div class="progress-bar-container">
+        <div class="progress-bar" id="verify-bar" style="width: 0%"></div>
+    </div>
+    <p class="progress-text" id="verify-text">No active task — click a button below to start.</p>
+</div>
+
+<div class="section">
+    <h2>Verify Emails</h2>
+
+    <div class="verify-actions">
+        <form method="post" class="verify-action-row" id="verify-form">
+            <input type="hidden" name="action" value="verify_campaign" id="verify-action-field">
+            <select name="campaign_id" id="verify-campaign-select">
+                <option value="">All campaigns</option>
+                {% for c in campaigns %}
+                <option value="{{ c.id }}">{{ c.name }} ({{ c.total_emails }} emails)</option>
+                {% endfor %}
+            </select>
+            <select id="verify-mode-select">
+                <option value="unverified">Verify Unverified</option>
+                <option value="unknown">Re-verify Unknown</option>
+                <option value="all">Re-verify All</option>
+            </select>
+            <button type="submit" class="btn btn-primary" id="verify-go-btn">Go</button>
+        </form>
+    </div>
+</div>
+
+<!-- ─── Verification Health Monitor ──────────────────────────── -->
+{% if verify_history %}
+<div class="section">
+    <h2>Verification Health</h2>
+
+    {% set latest = verify_history[0].stats %}
+    {% if latest %}
+    <div class="stats-grid stats-grid-sm">
+        <div class="stat-card">
+            <div class="stat-number">{{ latest.total }}</div>
+            <div class="stat-label">Emails Checked</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-number">{{ latest.result_valid }}</div>
+            <div class="stat-label">Valid</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-number">{{ latest.result_invalid }}</div>
+            <div class="stat-label">Invalid</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-number">{{ latest.result_risky }}</div>
+            <div class="stat-label">Risky</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-number {% if latest.result_unknown > latest.total * 0.3 %}stat-danger{% endif %}">{{ latest.result_unknown }}</div>
+            <div class="stat-label">Unknown</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-number">{{ latest.duration_seconds|default(0) }}s</div>
+            <div class="stat-label">Duration</div>
+        </div>
+    </div>
+
+    <!-- Method Breakdown -->
+    <div class="verify-health-grid">
+        <div class="verify-health-card">
+            <h3>How Decisions Were Made</h3>
+            <table class="table table-sm table-compact">
+                <thead>
+                    <tr><th>Method</th><th>Count</th><th>Meaning</th></tr>
+                </thead>
+                <tbody>
+                    {% if latest.method_smtp > 0 %}
+                    <tr><td><span class="badge badge-valid">SMTP</span></td><td>{{ latest.method_smtp }}</td><td>Full mailbox check via SMTP handshake</td></tr>
+                    {% endif %}
+                    {% if latest.method_smtp_catch_all|default(0) > 0 %}
+                    <tr><td><span class="badge badge-risky">SMTP Catch-All</span></td><td>{{ latest.method_smtp_catch_all }}</td><td>Domain accepts all emails — mailbox unconfirmed</td></tr>
+                    {% endif %}
+                    {% if latest.method_public_provider > 0 %}
+                    <tr><td><span class="badge badge-valid">Public Provider</span></td><td>{{ latest.method_public_provider }}</td><td>Gmail, Outlook, etc. — domain valid, mailbox unverifiable</td></tr>
+                    {% endif %}
+                    {% if latest.method_dns_no_mx > 0 %}
+                    <tr><td><span class="badge badge-invalid">No MX Record</span></td><td>{{ latest.method_dns_no_mx }}</td><td>Domain has no mail server configured</td></tr>
+                    {% endif %}
+                    {% if latest.method_dns_business_mx|default(0) > 0 %}
+                    <tr><td><span class="badge badge-risky">DNS Business MX</span></td><td>{{ latest.method_dns_business_mx }}</td><td>Has business MX (Google Workspace, M365) but SMTP unavailable</td></tr>
+                    {% endif %}
+                    {% if latest.method_dns_domain|default(0) > 0 %}
+                    <tr><td><span class="badge badge-risky">DNS Domain</span></td><td>{{ latest.method_dns_domain }}</td><td>Has MX + website but SMTP unavailable</td></tr>
+                    {% endif %}
+                    {% if latest.method_syntax > 0 %}
+                    <tr><td><span class="badge badge-invalid">Syntax</span></td><td>{{ latest.method_syntax }}</td><td>Invalid email format</td></tr>
+                    {% endif %}
+                    {% if latest.method_disposable > 0 %}
+                    <tr><td><span class="badge badge-risky">Disposable</span></td><td>{{ latest.method_disposable }}</td><td>Temporary/throwaway email domain</td></tr>
+                    {% endif %}
+                    {% if latest.method_spam_trap > 0 %}
+                    <tr><td><span class="badge badge-spam_trap">Spam Trap</span></td><td>{{ latest.method_spam_trap }}</td><td>Known spam trap pattern</td></tr>
+                    {% endif %}
+                    {% if latest.method_risky_local|default(0) > 0 %}
+                    <tr><td><span class="badge badge-risky">Risky Pattern</span></td><td>{{ latest.method_risky_local }}</td><td>Suspicious local part (test, keyboard mash, etc.)</td></tr>
+                    {% endif %}
+                </tbody>
+            </table>
+        </div>
+
+        <div class="verify-health-card">
+            <h3>SMTP Stats</h3>
+            {% if latest.smtp_available %}
+            <div class="stats-grid stats-grid-sm">
+                <div class="stat-card stat-card-sm">
+                    <div class="stat-number">{{ latest.smtp_checked }}</div>
+                    <div class="stat-label">SMTP Checked</div>
+                </div>
+                <div class="stat-card stat-card-sm">
+                    <div class="stat-number">{{ latest.smtp_valid }}</div>
+                    <div class="stat-label">SMTP Valid</div>
+                </div>
+                <div class="stat-card stat-card-sm">
+                    <div class="stat-number">{{ latest.smtp_invalid }}</div>
+                    <div class="stat-label">SMTP Invalid</div>
+                </div>
+                <div class="stat-card stat-card-sm">
+                    <div class="stat-number {% if latest.smtp_unknown > latest.smtp_checked * 0.4 %}stat-danger{% endif %}">{{ latest.smtp_unknown }}</div>
+                    <div class="stat-label">SMTP Unknown</div>
+                </div>
+            </div>
+            <p class="verify-meta">
+                {{ latest.unique_domains }} unique domains &middot; {{ latest.unique_mx_hosts }} MX hosts &middot;
+                {{ latest.smtp_catch_all_domains|default(0) }} catch-all domains
+            </p>
+            {% else %}
+            <div class="health-warn">
+                <strong>SMTP checks were unavailable during this run.</strong> Verification fell back to DNS-based scoring. This can happen when outbound SMTP connectivity is blocked or when the probe cannot reach the test MX hosts from the server.
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Warnings -->
+    {% if latest.smtp_available %}
+        {% set unknown_pct = (latest.result_unknown / latest.total * 100)|round if latest.total > 0 else 0 %}
+        {% set smtp_unknown_pct = (latest.smtp_unknown / latest.smtp_checked * 100)|round if latest.smtp_checked > 0 else 0 %}
+        {% if unknown_pct > 30 or smtp_unknown_pct > 40 %}
+        <div class="health-warnings">
+            {% if smtp_unknown_pct > 40 and latest.smtp_checked > 0 %}
+            <div class="health-warn">
+                <strong>High SMTP unknown rate ({{ smtp_unknown_pct }}%):</strong>
+                Mail servers are rejecting or timing out on SMTP checks. Possible causes: missing rDNS on your VPS IP, IP reputation issues, or aggressive rate limiting by target mail servers. Try reducing verify concurrency in Settings.
+            </div>
+            {% endif %}
+            {% if latest.no_mx_count > latest.total * 0.15 %}
+            <div class="health-warn">
+                <strong>{{ latest.no_mx_count }} emails have no MX record ({{ (latest.no_mx_count / latest.total * 100)|round }}%):</strong>
+                These domains don't have mail servers. The AI may be generating URLs for non-existent or parked domains.
+            </div>
+            {% endif %}
+            {% if latest.result_spam_trap > 5 %}
+            <div class="health-warn">
+                <strong>{{ latest.result_spam_trap }} spam traps detected:</strong>
+                Crawled pages may contain honeypot emails. This is normal — they're automatically filtered out.
+            </div>
+            {% endif %}
+        </div>
+        {% endif %}
+    {% endif %}
+
+    <!-- Run History -->
+    {% if verify_history|length > 1 %}
+    <details style="margin-top: 16px;">
+        <summary><h3 class="inline">Previous Runs</h3></summary>
+        <table class="table table-sm table-compact" style="margin-top: 8px;">
+            <thead>
+                <tr>
+                    <th>Date</th>
+                    <th>Total</th>
+                    <th>Valid</th>
+                    <th>Invalid</th>
+                    <th>Risky</th>
+                    <th>Unknown</th>
+                    <th>SMTP</th>
+                    <th>Duration</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for run in verify_history %}
+                {% set s = run.stats %}
+                <tr>
+                    <td>{{ run.created_at[:16] }}</td>
+                    <td>{{ s.total }}</td>
+                    <td>{{ s.result_valid }}</td>
+                    <td>{{ s.result_invalid }}</td>
+                    <td>{{ s.result_risky }}</td>
+                    <td>{{ s.result_unknown }}</td>
+                    <td>{% if s.smtp_available %}<span class="badge badge-valid">Open</span>{% else %}<span class="badge badge-invalid">Unavailable</span>{% endif %}</td>
+                    <td>{{ s.duration_seconds|default(0) }}s</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </details>
+    {% endif %}
+
+    {% endif %}
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.getElementById('verify-form')?.addEventListener('submit', function(e) {
+    const actionField = document.getElementById('verify-action-field');
+    const campaign = document.getElementById('verify-campaign-select').value;
+    const mode = document.getElementById('verify-mode-select').value;
+
+    if (mode === 'unverified') {
+        actionField.value = campaign ? 'verify_campaign' : 'verify_all';
+    } else if (mode === 'unknown') {
+        actionField.value = campaign ? 'reverify_campaign' : 'reverify_unknown';
+    } else if (mode === 'all') {
+        const target = campaign ? 'this campaign' : 'ALL campaigns';
+        if (!confirm(`Re-verify ALL emails in ${target}? This re-checks every email including valid/invalid.`)) {
+            e.preventDefault();
+            return;
+        }
+        actionField.value = campaign ? 'reverify_all_campaign' : 'reverify_all';
+    }
+});
+
+pollVerificationTask();
+</script>
+{% endblock %}

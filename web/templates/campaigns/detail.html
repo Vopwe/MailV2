@@ -1,0 +1,238 @@
+{% extends "base.html" %}
+{% block title %}{{ campaign.name }} — GraphenMail{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div>
+        <h1>{{ campaign.name }}</h1>
+        <p class="subtitle">
+            <span class="badge badge-{{ campaign.status }}" id="campaign-status-badge">{{ campaign.status }}</span>
+            &mdash; {{ campaign.niches | join(', ') }} in {{ campaign.countries | join(', ') }}
+        </p>
+    </div>
+    <div class="header-actions">
+        {% if campaign.status in ['pending', 'done', 'failed'] %}
+        <form method="post" action="/campaigns/{{ campaign.id }}/run" class="inline-form">
+            <button type="submit" class="btn btn-primary">
+                {% if campaign.status == 'pending' %}Run Campaign{% else %}Re-run{% endif %}
+            </button>
+        </form>
+        {% endif %}
+        {% if campaign.total_emails > 0 %}
+        <form method="post" action="/verification" class="inline-form">
+            <input type="hidden" name="action" value="verify_campaign">
+            <input type="hidden" name="campaign_id" value="{{ campaign.id }}">
+            <input type="hidden" name="redirect_to" value="/campaigns/{{ campaign.id }}">
+            <button type="submit" class="btn btn-primary">Verify All Emails</button>
+        </form>
+        <a href="/emails/export?campaign_id={{ campaign.id }}" class="btn btn-secondary">Export CSV</a>
+        {% endif %}
+        <a href="/emails?campaign_id={{ campaign.id }}" class="btn btn-secondary">View All Emails</a>
+    </div>
+</div>
+
+{% if campaign.status in ['generating', 'crawling'] or current_task %}
+<div class="progress-section" id="progress-section" data-campaign-id="{{ campaign.id }}" data-task-id="{{ task_id or '' }}">
+    <div class="progress-bar-container">
+        <div class="progress-bar" id="progress-bar" style="width: {{ current_task.percent if current_task else 0 }}%"></div>
+    </div>
+    <p class="progress-text" id="progress-text">
+        {% if current_task %}
+            {% if current_task.status == 'completed' %}
+                {{ current_task.message or 'Completed!' }}
+            {% elif current_task.status == 'failed' %}
+                {{ current_task.error or 'Campaign failed.' }}
+            {% else %}
+                {{ current_task.message or 'Running...' }}
+            {% endif %}
+        {% else %}
+            Running...
+        {% endif %}
+    </p>
+</div>
+{% endif %}
+
+
+<div class="stats-grid stats-grid-sm">
+    <div class="stat-card">
+        <div class="stat-number">{{ campaign.total_urls }}</div>
+        <div class="stat-label">URLs Generated</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-number">{{ campaign.total_emails }}</div>
+        <div class="stat-label">Emails Found</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-number">{{ campaign.niches | length }}</div>
+        <div class="stat-label">Niches</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-number">{{ campaign.countries | length }}</div>
+        <div class="stat-label">Countries</div>
+    </div>
+</div>
+
+{% if crawl_stats %}
+<!-- ─── Crawl Health ─────────────────────────────────── -->
+<div class="section">
+    <h2>Crawl Health</h2>
+
+    <div class="verify-health-grid">
+        <div class="verify-health-card">
+            <h3>Domain Stats</h3>
+            <table class="table table-sm table-compact">
+                <thead>
+                    <tr><th>Metric</th><th>Count</th><th>Meaning</th></tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><span class="badge badge-valid">Reachable</span></td>
+                        <td>{{ crawl_stats.domains_reachable }}<span class="stat-sub"> / {{ crawl_stats.domains_total }}</span></td>
+                        <td>Domains that responded to HTTP request</td>
+                    </tr>
+                    <tr>
+                        <td><span class="badge badge-invalid">Unreachable</span></td>
+                        <td>{{ crawl_stats.domains_unreachable }}</td>
+                        <td>Domains that timed out or returned errors</td>
+                    </tr>
+                    <tr>
+                        <td><span class="badge badge-valid">With Emails</span></td>
+                        <td>{{ crawl_stats.domains_with_emails }}</td>
+                        <td>Domains where at least one email was found</td>
+                    </tr>
+                    <tr>
+                        <td><span class="badge badge-risky">Without Emails</span></td>
+                        <td>{{ crawl_stats.domains_without_emails }}</td>
+                        <td>Reachable domains with no emails on crawled pages</td>
+                    </tr>
+                    {% if crawl_stats.deduped_domains > 0 %}
+                    <tr>
+                        <td><span class="badge badge-unknown">Deduped</span></td>
+                        <td>{{ crawl_stats.deduped_domains }}</td>
+                        <td>Skipped — already crawled in other campaigns</td>
+                    </tr>
+                    {% endif %}
+                </tbody>
+            </table>
+        </div>
+
+        <div class="verify-health-card">
+            <h3>Page Stats</h3>
+            <div class="stats-grid stats-grid-sm">
+                <div class="stat-card stat-card-sm">
+                    <div class="stat-number">{{ crawl_stats.pages_fetched }}</div>
+                    <div class="stat-label">Pages Fetched</div>
+                </div>
+                <div class="stat-card stat-card-sm">
+                    <div class="stat-number {% if crawl_stats.pages_failed > crawl_stats.pages_fetched * 0.3 %}stat-danger{% endif %}">{{ crawl_stats.pages_failed }}</div>
+                    <div class="stat-label">Pages Failed</div>
+                </div>
+                <div class="stat-card stat-card-sm">
+                    <div class="stat-number">{{ crawl_stats.pages_discovered }}</div>
+                    <div class="stat-label">Discovered Links</div>
+                </div>
+                <div class="stat-card stat-card-sm">
+                    <div class="stat-number">{{ crawl_stats.emails_per_domain }}</div>
+                    <div class="stat-label">Emails / Domain</div>
+                </div>
+            </div>
+            {% if crawl_stats.pages_robots_blocked > 0 %}
+            <p class="verify-meta" style="margin-top: 8px;">
+                {{ crawl_stats.pages_robots_blocked }} pages blocked by robots.txt
+            </p>
+            {% endif %}
+        </div>
+    </div>
+
+    {% set reach_pct = (crawl_stats.domains_reachable / crawl_stats.domains_total * 100) | round if crawl_stats.domains_total > 0 else 0 %}
+    {% set email_pct = (crawl_stats.domains_with_emails / crawl_stats.domains_reachable * 100) | round if crawl_stats.domains_reachable > 0 else 0 %}
+    {% if reach_pct < 50 or email_pct < 20 %}
+    <div class="health-warnings">
+        {% if reach_pct < 50 %}
+        <div class="health-warn">
+            <strong>Low reachability ({{ reach_pct }}%):</strong> Many domains unreachable. AI may be generating non-existent URLs. Try increasing request timeout or using a different AI model.
+        </div>
+        {% endif %}
+        {% if email_pct < 20 %}
+        <div class="health-warn">
+            <strong>Low email yield ({{ email_pct }}% of reachable domains):</strong>
+            {% if crawl_stats.pages_robots_blocked > 10 %}
+            robots.txt blocking {{ crawl_stats.pages_robots_blocked }} pages — switch to "Soft" or "Off" mode in Settings.
+            {% else %}
+            Target domains may not list emails publicly. Try different niches or increase max pages per domain.
+            {% endif %}
+        </div>
+        {% endif %}
+    </div>
+    {% endif %}
+</div>
+{% endif %}
+
+{% if urls %}
+<div class="section">
+    <details>
+        <summary><h2 class="inline">Generated URLs ({{ urls | length }})</h2></summary>
+        <table class="table table-sm table-compact">
+            <thead>
+                <tr>
+                    <th>URL</th>
+                    <th>Niche</th>
+                    <th>City</th>
+                    <th>Status</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for u in urls[:20] %}
+                <tr>
+                    <td><a href="{{ u.url }}" target="_blank" rel="noopener">{{ u.domain }}</a></td>
+                    <td>{{ u.niche }}</td>
+                    <td>{{ u.city }}</td>
+                    <td><span class="badge badge-{{ u.status }}">{{ u.status }}</span></td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% if urls | length > 20 %}
+        <p class="hint">Showing first 20 of {{ urls | length }} URLs</p>
+        {% endif %}
+    </details>
+</div>
+{% endif %}
+
+{% if emails %}
+<div class="section">
+    <details>
+        <summary><h2 class="inline">Extracted Emails ({{ total_emails }} total)</h2></summary>
+        <table class="table table-sm table-compact">
+            <thead>
+                <tr>
+                    <th>Email</th>
+                    <th>Source</th>
+                    <th>Status</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for e in emails[:20] %}
+                <tr>
+                    <td>{{ e.email }}</td>
+                    <td>{{ e.source_domain }}</td>
+                    <td><span class="badge badge-{{ e.verification }}">{{ e.verification }}</span></td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% if total_emails > 20 %}
+        <p class="hint">Showing first 20 of {{ total_emails }} — <a href="/emails?campaign_id={{ campaign.id }}">View all &rarr;</a></p>
+        {% endif %}
+    </details>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+{% if campaign.status in ['generating', 'crawling'] or task_id %}
+    pollTasks();
+{% endif %}
+</script>
+{% endblock %}

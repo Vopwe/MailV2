@@ -1,0 +1,97 @@
+# Known spam trap / honeypot domains
+# Emails from these domains are planted to catch spammers
+# Sources: public spam trap databases, anti-spam community lists
+#
+# Format: one domain per line, lines starting with # are comments
+
+# Project Honeypot domains
+projecthoneypot.org
+dnsbl.info
+
+# Known trap operators
+spamcop.net
+spamhaus.org
+abuseat.org
+mailspike.org
+spameatingmonkey.net
+backscatterer.org
+
+# Recycled / parked trap domains
+emailharvest.com
+emailharvesting.com
+spambog.com
+spambog.de
+spambog.ru
+spamfree24.org
+spamgourmet.com
+trashmail.com
+trashmail.me
+trashmail.net
+trashymail.com
+trashymail.net
+spam4.me
+sharklasers.com
+guerrillamail.info
+guerrillamail.com
+guerrillamail.de
+guerrillamail.net
+guerrillamail.org
+guerrillamailblock.com
+grr.la
+dispostable.com
+mailinator.com
+mailinator.net
+mailinator2.com
+mailinator.us
+devnullmail.com
+jetable.org
+fakeinbox.com
+discard.email
+discardmail.com
+discardmail.de
+yopmail.com
+yopmail.fr
+yopmail.net
+tempail.com
+throw-away.email
+throwam.com
+tempinbox.com
+mailcatch.com
+meltmail.com
+getairmail.com
+mailnesia.com
+incognitomail.org
+tempmailer.com
+tempmailo.com
+mytrashmail.com
+harakirimail.com
+bugmenot.com
+mailnull.com
+spamhereplease.com
+safetymail.info
+trashcanmail.com
+mailexpire.com
+mailmoat.com
+mailshell.com
+dingbone.com
+dontreg.com
+e4ward.com
+emailthe.net
+emailx.at.hm
+nobulk.com
+nospamfor.us
+tempemail.net
+tempsky.com
+mailzilla.com
+spamfree.eu
+spaml.de
+uggsrock.com
+reallymymail.com
+mailblocks.com
+emailage.com
+spamcero.com
+spamex.com
+
+# Trap-hosting infrastructure
+bounces.amazon.com
+abuse.net
