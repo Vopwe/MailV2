@@ -312,6 +312,7 @@ async def _scrape_bing_page(query: str, first: int = 0, mkt: str = "en-US", cc: 
                 return [], True
 
             urls = _parse_bing_results(html)
+            logger.info(f"Bing via IP {ip or 'default'}: {len(urls)} results")
             return urls, False
 
     except Exception as e:

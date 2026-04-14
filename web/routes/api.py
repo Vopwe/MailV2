@@ -31,3 +31,16 @@ def cities_for_country(country):
     locs = config.get_locations()
     data = locs.get(country, {})
     return jsonify(data.get("cities", []))
+
+
+@bp.route("/ip-status")
+def ip_status():
+    """IP rotation status — check if IPs are configured and rotating."""
+    try:
+        from search.rotator import get_status, get_available_ips, _load_ips
+        status = get_status()
+        status["configured_ips"] = _load_ips()
+        status["currently_available"] = get_available_ips()
+        return jsonify(status)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
