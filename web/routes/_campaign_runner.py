@@ -18,12 +18,12 @@ logger = logging.getLogger(__name__)
 
 
 def _generate_for_combo(combo, urls_per_batch):
-    """Worker: generate URLs for a single (niche, city, country, tld) combo via Bing."""
+    """Worker: generate URLs for a single (niche, city, country, tld) combo."""
     niche, city, country, country_tld = combo
     try:
-        urls = generate_urls(niche, city, country, country_tld, count=urls_per_batch)
+        url_tuples = generate_urls(niche, city, country, country_tld, count=urls_per_batch)
         rows = []
-        for url in urls:
+        for url, source in url_tuples:
             ext = tldextract.extract(url)
             domain = f"{ext.domain}.{ext.suffix}"
             rows.append({
@@ -32,6 +32,7 @@ def _generate_for_combo(combo, urls_per_batch):
                 "niche": niche,
                 "city": city,
                 "country": country,
+                "source": source,
             })
         return rows
     except Exception as e:

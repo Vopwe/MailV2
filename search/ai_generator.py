@@ -58,7 +58,7 @@ async def generate_ai_urls(niche: str, city: str, country: str, count: int = 40)
     """
     api_key = _get_api_key()
     if not api_key:
-        logger.debug("OpenRouter: no API key configured, skipping AI URL generation")
+        logger.info("OpenRouter: no API key configured, skipping AI URL generation")
         return []
 
     model = _get_model()

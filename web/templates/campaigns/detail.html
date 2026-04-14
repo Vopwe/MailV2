@@ -72,6 +72,28 @@
     </div>
 </div>
 
+{% if ip_status.total_ips > 0 %}
+<div class="section" style="margin-top: 12px;">
+    <p class="hint">
+        <strong>IP Rotation:</strong>
+        {{ ip_status.total_ips }} IPs configured |
+        <span style="color: var(--success);">{{ ip_status.available_ips }} available</span>
+        {% if ip_status.cooled_down_ips > 0 %}
+        | <span style="color: var(--warning);">{{ ip_status.cooled_down_ips }} on cooldown</span>
+        {% endif %}
+        {% if ip_status.configured_ips %}
+        | <small>{{ ip_status.configured_ips | join(', ') }}</small>
+        {% endif %}
+    </p>
+</div>
+{% elif ip_status.total_ips == 0 %}
+<div class="section" style="margin-top: 12px;">
+    <p class="hint" style="color: var(--warning);">
+        <strong>IP Rotation:</strong> No IPs configured — using server default. Add IPs in Settings → IP Rotation.
+    </p>
+</div>
+{% endif %}
+
 {% if crawl_stats %}
 <!-- ─── Crawl Health ─────────────────────────────────── -->
 <div class="section">
@@ -172,19 +194,42 @@
 <div class="section">
     <details>
         <summary><h2 class="inline">Generated URLs ({{ urls | length }})</h2></summary>
+        {% set bing_count = urls | selectattr('source', 'equalto', 'bing') | list | length %}
+        {% set ddg_count = urls | selectattr('source', 'equalto', 'ddg') | list | length %}
+        {% set ai_count = urls | selectattr('source', 'equalto', 'ai') | list | length %}
+        {% set unknown_count = urls | length - bing_count - ddg_count - ai_count %}
+        <p class="hint" style="margin-bottom: 8px;">
+            Sources:
+            {% if ddg_count %}<span class="badge badge-valid">DDG: {{ ddg_count }}</span> {% endif %}
+            {% if bing_count %}<span class="badge badge-unknown">Bing: {{ bing_count }}</span> {% endif %}
+            {% if ai_count %}<span class="badge" style="background: var(--purple, #8b5cf6); color: #fff;">AI: {{ ai_count }}</span> {% endif %}
+            {% if unknown_count > 0 %}<span class="badge">Other: {{ unknown_count }}</span> {% endif %}
+        </p>
         <table class="table table-sm table-compact">
             <thead>
                 <tr>
                     <th>URL</th>
+                    <th>Source</th>
                     <th>Niche</th>
                     <th>City</th>
                     <th>Status</th>
                 </tr>
             </thead>
             <tbody>
-                {% for u in urls[:20] %}
+                {% for u in urls[:30] %}
                 <tr>
                     <td><a href="{{ u.url }}" target="_blank" rel="noopener">{{ u.domain }}</a></td>
+                    <td>
+                        {% if u.source == 'ddg' %}
+                        <span class="badge badge-valid">DDG</span>
+                        {% elif u.source == 'bing' %}
+                        <span class="badge badge-unknown">Bing</span>
+                        {% elif u.source == 'ai' %}
+                        <span class="badge" style="background: var(--purple, #8b5cf6); color: #fff;">AI</span>
+                        {% else %}
+                        <span class="badge">{{ u.source or '?' }}</span>
+                        {% endif %}
+                    </td>
                     <td>{{ u.niche }}</td>
                     <td>{{ u.city }}</td>
                     <td><span class="badge badge-{{ u.status }}">{{ u.status }}</span></td>
@@ -192,8 +237,8 @@
                 {% endfor %}
             </tbody>
         </table>
-        {% if urls | length > 20 %}
-        <p class="hint">Showing first 20 of {{ urls | length }} URLs</p>
+        {% if urls | length > 30 %}
+        <p class="hint">Showing first 30 of {{ urls | length }} URLs</p>
         {% endif %}
     </details>
 </div>

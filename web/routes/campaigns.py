@@ -69,11 +69,21 @@ def detail(campaign_id):
     urls = database.get_urls(campaign_id)
     emails_list, total_emails = database.get_emails(campaign_id=campaign_id, per_page=50)
     crawl_stats = database.get_campaign_stats(campaign_id)
+
+    # IP rotation status
+    ip_status = {"total_ips": 0, "available_ips": 0, "cooled_down_ips": 0}
+    try:
+        from search.rotator import get_status, _load_ips
+        ip_status = get_status()
+        ip_status["configured_ips"] = _load_ips()
+    except Exception:
+        pass
+
     return render_template("campaigns/detail.html",
                            campaign=campaign, urls=urls,
                            emails=emails_list, total_emails=total_emails,
                            crawl_stats=crawl_stats, task_id=task_id,
-                           current_task=current_task)
+                           current_task=current_task, ip_status=ip_status)
 
 
 @bp.route("/<int:campaign_id>/run", methods=["POST"])

@@ -128,6 +128,7 @@ def init_db():
             niche       TEXT,
             city        TEXT,
             country     TEXT,
+            source      TEXT DEFAULT 'unknown',
             status      TEXT NOT NULL DEFAULT 'pending',
             http_status INTEGER,
             crawled_at  TEXT,
@@ -253,11 +254,22 @@ def _ensure_campaigns_stats_column():
 def insert_urls(rows: list[dict]):
     if not rows:
         return
+    # Ensure source column exists for older databases
+    _ensure_urls_source_column()
     with _write_db() as db:
         db.executemany(
-            "INSERT INTO urls (campaign_id, url, domain, niche, city, country) VALUES (:campaign_id, :url, :domain, :niche, :city, :country)",
+            "INSERT INTO urls (campaign_id, url, domain, niche, city, country, source) VALUES (:campaign_id, :url, :domain, :niche, :city, :country, :source)",
             rows,
         )
+
+
+def _ensure_urls_source_column():
+    """Add source column to urls table if it doesn't exist (migration)."""
+    db = get_db()
+    columns = {row["name"] for row in db.execute("PRAGMA table_info(urls)").fetchall()}
+    if "source" not in columns:
+        with _write_db() as wdb:
+            wdb.execute("ALTER TABLE urls ADD COLUMN source TEXT DEFAULT 'unknown'")
 
 
 def get_urls(campaign_id: int, status: str | None = None) -> list[dict]:

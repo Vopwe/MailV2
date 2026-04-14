@@ -351,11 +351,13 @@ async def _scrape_query(query_str: str, target_count: int, mkt: str = "en-US", c
     return all_urls
 
 
-def generate_urls(niche: str, city: str, country: str, country_tld: str = ".com", count: int = 40) -> list[str]:
+def generate_urls(niche: str, city: str, country: str, country_tld: str = ".com", count: int = 40) -> list[tuple[str, str]]:
     """
     Generate URLs by scraping Bing + DuckDuckGo + OpenRouter AI.
     All three sources run in parallel for maximum yield and speed.
     AI is optional — only runs if OpenRouter API key is configured.
+
+    Returns: list of (url, source) tuples where source is 'bing', 'ddg', or 'ai'.
     """
     from search.duckduckgo import scrape_ddg
     from search.ai_generator import generate_ai_urls
@@ -406,15 +408,41 @@ def generate_urls(niche: str, city: str, country: str, country_tld: str = ".com"
     except RuntimeError:
         asyncio.run(_run())
 
-    # Merge: DDG first (reliable from EU), then AI, then Bing
-    all_raw = ddg_urls + ai_urls + [u for u in _filter_urls(bing_urls)]
-    filtered = _filter_urls(all_raw)
+    # Tag each URL with its source, dedup by domain keeping first occurrence
+    tagged = []
+    seen_domains = set()
 
-    result = filtered[:count]
+    # DDG first (reliable from EU), then AI, then Bing
+    for url in ddg_urls:
+        ext = tldextract.extract(url)
+        domain = f"{ext.domain}.{ext.suffix}"
+        if domain not in seen_domains and domain not in SKIP_DOMAINS:
+            seen_domains.add(domain)
+            tagged.append((url, "ddg"))
+
+    for url in ai_urls:
+        ext = tldextract.extract(url)
+        domain = f"{ext.domain}.{ext.suffix}"
+        if domain not in seen_domains and domain not in SKIP_DOMAINS:
+            seen_domains.add(domain)
+            tagged.append((url, "ai"))
+
+    for url in _filter_urls(bing_urls):
+        ext = tldextract.extract(url)
+        domain = f"{ext.domain}.{ext.suffix}"
+        if domain not in seen_domains:
+            seen_domains.add(domain)
+            tagged.append((url, "bing"))
+
+    result = tagged[:count]
+    bing_count = sum(1 for _, s in result if s == "bing")
+    ddg_count = sum(1 for _, s in result if s == "ddg")
+    ai_count = sum(1 for _, s in result if s == "ai")
     logger.info(
         f"URL generation complete: {len(result)} URLs "
-        f"(Bing: {len(_filter_urls(bing_urls))}, DDG: {len(ddg_urls)}, AI: {len(ai_urls)}) "
+        f"(Bing: {bing_count}, DDG: {ddg_count}, AI: {ai_count}) "
         f"for {niche} in {city}, {country}"
     )
     return result
+
 
