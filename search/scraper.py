@@ -353,11 +353,12 @@ async def _scrape_query(query_str: str, target_count: int, mkt: str = "en-US", c
 
 def generate_urls(niche: str, city: str, country: str, country_tld: str = ".com", count: int = 40) -> list[str]:
     """
-    Generate URLs by scraping Bing + DuckDuckGo search results.
-    Uses both engines and merges results for maximum yield.
-    DDG is critical for European VPS IPs where Bing geo-targets badly.
+    Generate URLs by scraping Bing + DuckDuckGo + OpenRouter AI.
+    All three sources run in parallel for maximum yield and speed.
+    AI is optional — only runs if OpenRouter API key is configured.
     """
     from search.duckduckgo import scrape_ddg
+    from search.ai_generator import generate_ai_urls
 
     # Resolve country to Bing market code to override IP-based geo-detection
     mkt, cc = _get_bing_market(country)
@@ -366,9 +367,9 @@ def generate_urls(niche: str, city: str, country: str, country_tld: str = ".com"
     queries = build_queries(niche, city, country, country_tld, count)
     bing_urls = []
     ddg_urls = []
+    ai_urls = []
 
     async def _run():
-        # Run Bing and DDG concurrently
         async def _bing_task():
             for i, q_info in enumerate(queries):
                 query_str = q_info["query"]
@@ -387,8 +388,12 @@ def generate_urls(niche: str, city: str, country: str, country_tld: str = ".com"
             result = await scrape_ddg(niche, city, country, count=count)
             ddg_urls.extend(result)
 
-        # Run both in parallel
-        await asyncio.gather(_bing_task(), _ddg_task())
+        async def _ai_task():
+            result = await generate_ai_urls(niche, city, country, count=count)
+            ai_urls.extend(result)
+
+        # Run all three in parallel
+        await asyncio.gather(_bing_task(), _ddg_task(), _ai_task())
 
     # Handle case where we're already in an event loop
     try:
@@ -401,14 +406,15 @@ def generate_urls(niche: str, city: str, country: str, country_tld: str = ".com"
     except RuntimeError:
         asyncio.run(_run())
 
-    # Merge: DDG first (more reliable from EU IPs), then Bing
-    all_raw = ddg_urls + [u for u in _filter_urls(bing_urls)]
+    # Merge: DDG first (reliable from EU), then AI, then Bing
+    all_raw = ddg_urls + ai_urls + [u for u in _filter_urls(bing_urls)]
     filtered = _filter_urls(all_raw)
 
     result = filtered[:count]
     logger.info(
         f"URL generation complete: {len(result)} URLs "
-        f"(Bing: {len(_filter_urls(bing_urls))}, DDG: {len(ddg_urls)}) "
+        f"(Bing: {len(_filter_urls(bing_urls))}, DDG: {len(ddg_urls)}, AI: {len(ai_urls)}) "
         f"for {niche} in {city}, {country}"
     )
     return result
+

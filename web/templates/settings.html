@@ -10,6 +10,7 @@
     <div class="settings-tabs">
         <button type="button" class="settings-tab active" data-tab="bing">Bing Scraper</button>
         <button type="button" class="settings-tab" data-tab="ips">IP Rotation</button>
+        <button type="button" class="settings-tab" data-tab="ai">AI (OpenRouter)</button>
         <button type="button" class="settings-tab" data-tab="crawl">Crawl</button>
         <button type="button" class="settings-tab" data-tab="verify">Verification</button>
         <button type="button" class="settings-tab" data-tab="security">Security</button>
@@ -96,7 +97,53 @@
                 {% endif %}
             </div>
         </div>
+        <div class="form-row">
+            <div class="form-group">
+                <button type="button" class="btn btn-secondary" onclick="refreshIpStatus()" style="margin-top: 8px;">Refresh Status</button>
+                <span class="hint" id="ip-refresh-msg"></span>
+            </div>
+        </div>
         {% endif %}
+    </div>
+
+    <div class="settings-panel" id="tab-ai">
+        <h2>AI URL Generation (OpenRouter)</h2>
+        <p class="hint" style="margin-bottom: 16px;">Optional. Uses a free AI model to generate additional business URLs alongside Bing and DuckDuckGo. All three sources run in parallel.</p>
+        <div class="form-row">
+            <div class="form-group" style="flex: 1 1 100%;">
+                <label for="openrouter_api_key">OpenRouter API Key</label>
+                <input type="password" id="openrouter_api_key" name="openrouter_api_key"
+                       value="{{ settings.get('openrouter_api_key', '') }}"
+                       placeholder="sk-or-v1-...">
+                <span class="hint">
+                    Get a free key at <a href="https://openrouter.ai/keys" target="_blank" rel="noopener">openrouter.ai/keys</a>.
+                    Leave empty to disable AI URL generation.
+                </span>
+            </div>
+        </div>
+        <div class="form-row">
+            <div class="form-group">
+                <label for="openrouter_model">AI Model</label>
+                <select id="openrouter_model" name="openrouter_model">
+                    <option value="google/gemma-3-1b-it:free" {% if settings.get('openrouter_model', 'google/gemma-3-1b-it:free') == 'google/gemma-3-1b-it:free' %}selected{% endif %}>Gemma 3 1B (Free)</option>
+                    <option value="meta-llama/llama-3.1-8b-instruct:free" {% if settings.get('openrouter_model') == 'meta-llama/llama-3.1-8b-instruct:free' %}selected{% endif %}>Llama 3.1 8B (Free)</option>
+                    <option value="mistralai/mistral-small-3.1-24b-instruct:free" {% if settings.get('openrouter_model') == 'mistralai/mistral-small-3.1-24b-instruct:free' %}selected{% endif %}>Mistral Small 3.1 24B (Free)</option>
+                    <option value="google/gemma-3-4b-it:free" {% if settings.get('openrouter_model') == 'google/gemma-3-4b-it:free' %}selected{% endif %}>Gemma 3 4B (Free)</option>
+                </select>
+                <span class="hint">All listed models are free. Larger models may give better URL diversity.</span>
+            </div>
+            <div class="form-group">
+                <label>Status</label>
+                <div class="ip-status-grid">
+                    <div class="stat-mini">
+                        <span class="stat-label">AI Source</span>
+                        <span class="stat-value" style="color: {% if settings.get('openrouter_api_key') %}var(--success){% else %}var(--text-muted){% endif %};">
+                            {% if settings.get('openrouter_api_key') %}Active{% else %}Disabled{% endif %}
+                        </span>
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
 
     <div class="settings-panel" id="tab-crawl">
@@ -215,5 +262,22 @@ document.querySelectorAll('.settings-tab').forEach(tab => {
         document.getElementById('tab-' + tab.dataset.tab).classList.add('active');
     });
 });
+
+async function refreshIpStatus() {
+    const msg = document.getElementById('ip-refresh-msg');
+    msg.textContent = 'Checking...';
+    try {
+        const res = await fetch('/api/ip-status');
+        const data = await res.json();
+        msg.textContent = `Total: ${data.total_ips} | Available: ${data.total_ips - data.cooled_down_ips} | Cooldown: ${data.cooled_down_ips}`;
+        if (data.configured_ips && data.configured_ips.length) {
+            msg.textContent += ` | IPs: ${data.configured_ips.join(', ')}`;
+        }
+        msg.style.color = data.total_ips > 0 ? 'var(--success)' : 'var(--warning)';
+    } catch (e) {
+        msg.textContent = 'Error: ' + e.message;
+        msg.style.color = 'var(--danger)';
+    }
+}
 </script>
 {% endblock %}
