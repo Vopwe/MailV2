@@ -1,7 +1,8 @@
 """
-JSON API endpoints — task status polling, locations data.
+JSON API endpoints — task status polling, locations data, logs.
 """
-from flask import Blueprint, jsonify
+import os
+from flask import Blueprint, jsonify, request
 import tasks
 import config
 
@@ -44,3 +45,52 @@ def ip_status():
         return jsonify(status)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+@bp.route("/logs")
+def logs():
+    """Return last N lines of server log."""
+    lines = int(request.args.get("lines", 100))
+    lines = min(lines, 500)
+
+    # Try multiple common log locations
+    log_paths = [
+        os.path.join(config.BASE_DIR, "server.out.log"),
+        os.path.join(config.BASE_DIR, "server.log"),
+        "/var/log/graphenmail.log",
+    ]
+
+    for path in log_paths:
+        if os.path.exists(path):
+            try:
+                with open(path, "r", errors="replace") as f:
+                    all_lines = f.readlines()
+                    tail = all_lines[-lines:]
+                    return jsonify({
+                        "file": path,
+                        "total_lines": len(all_lines),
+                        "showing": len(tail),
+                        "lines": [l.rstrip() for l in tail],
+                    })
+            except Exception as e:
+                return jsonify({"error": f"Can't read {path}: {e}"}), 500
+
+    # If no file found, try journalctl
+    try:
+        import subprocess
+        result = subprocess.run(
+            ["journalctl", "-u", "graphenmail", "-n", str(lines), "--no-pager"],
+            capture_output=True, text=True, timeout=5,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return jsonify({
+                "file": "journalctl -u graphenmail",
+                "total_lines": lines,
+                "showing": lines,
+                "lines": result.stdout.strip().split("\n"),
+            })
+    except Exception:
+        pass
+
+    return jsonify({"error": "No log file found", "searched": log_paths}), 404
+

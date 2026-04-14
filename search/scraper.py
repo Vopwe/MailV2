@@ -354,8 +354,8 @@ async def _scrape_query(query_str: str, target_count: int, mkt: str = "en-US", c
 def generate_urls(niche: str, city: str, country: str, country_tld: str = ".com", count: int = 40) -> list[tuple[str, str]]:
     """
     Generate URLs by scraping Bing + DuckDuckGo + OpenRouter AI.
-    All three sources run in parallel for maximum yield and speed.
-    AI is optional — only runs if OpenRouter API key is configured.
+    Bing and DDG run in parallel first. If they don't reach the target count,
+    AI fills the remaining gap.
 
     Returns: list of (url, source) tuples where source is 'bing', 'ddg', or 'ai'.
     """
@@ -372,6 +372,7 @@ def generate_urls(niche: str, city: str, country: str, country_tld: str = ".com"
     ai_urls = []
 
     async def _run():
+        # Phase 1: Run Bing and DDG in parallel
         async def _bing_task():
             for i, q_info in enumerate(queries):
                 query_str = q_info["query"]
@@ -390,12 +391,27 @@ def generate_urls(niche: str, city: str, country: str, country_tld: str = ".com"
             result = await scrape_ddg(niche, city, country, count=count)
             ddg_urls.extend(result)
 
-        async def _ai_task():
-            result = await generate_ai_urls(niche, city, country, count=count)
-            ai_urls.extend(result)
+        await asyncio.gather(_bing_task(), _ddg_task())
 
-        # Run all three in parallel
-        await asyncio.gather(_bing_task(), _ddg_task(), _ai_task())
+        # Phase 2: Count what Bing+DDG found, use AI to fill the gap
+        seen_domains = set()
+        for url in ddg_urls:
+            ext = tldextract.extract(url)
+            domain = f"{ext.domain}.{ext.suffix}"
+            if domain not in SKIP_DOMAINS:
+                seen_domains.add(domain)
+        for url in _filter_urls(bing_urls):
+            ext = tldextract.extract(url)
+            domain = f"{ext.domain}.{ext.suffix}"
+            seen_domains.add(domain)
+
+        remaining = count - len(seen_domains)
+        if remaining > 0:
+            logger.info(f"Bing+DDG found {len(seen_domains)} URLs, AI filling {remaining} more")
+            result = await generate_ai_urls(niche, city, country, count=remaining)
+            ai_urls.extend(result)
+        else:
+            logger.info(f"Bing+DDG found {len(seen_domains)} URLs — no AI needed")
 
     # Handle case where we're already in an event loop
     try:
@@ -444,5 +460,6 @@ def generate_urls(niche: str, city: str, country: str, country_tld: str = ".com"
         f"for {niche} in {city}, {country}"
     )
     return result
+
 
 

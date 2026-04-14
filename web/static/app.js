@@ -76,7 +76,7 @@ function pollTasks() {
             } else {
                 window.location.replace(target);
             }
-        }, 1500);
+        }, 500);
     }
 
     function pickLatestCampaignTask(tasks) {
@@ -115,8 +115,19 @@ function pollTasks() {
         setTimeout(poll, 1500);
     }
 
+    // Also set a safety timeout — if no task response after 30s, reload
+    let lastActivity = Date.now();
+    const safetyInterval = setInterval(() => {
+        if (hasReloaded) { clearInterval(safetyInterval); return; }
+        if (Date.now() - lastActivity > 30000) {
+            clearInterval(safetyInterval);
+            window.location.reload();
+        }
+    }, 5000);
+
     function poll() {
         if (hasReloaded) return;
+        lastActivity = Date.now();
 
         if (taskId) {
             fetch(`/api/tasks/${taskId}`)
@@ -232,13 +243,8 @@ function pollVerificationTask() {
     }
 
     function resetProgress() {
-        if (!alwaysVisible) {
-            progressSection.style.display = 'none';
-            if (progressBar) progressBar.style.width = '0%';
-            return;
-        }
-
-        setProgress(0, 'No active task - click a button below to start.');
+        progressSection.style.display = 'none';
+        if (progressBar) progressBar.style.width = '0%';
     }
 
     function reloadWithoutTaskParam() {

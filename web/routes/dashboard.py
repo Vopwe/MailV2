@@ -14,3 +14,8 @@ def index():
     chart_data = database.get_chart_data()
     return render_template("dashboard.html", stats=stats,
                            chart_data_json=json.dumps(chart_data))
+
+
+@bp.route("/logs")
+def logs():
+    return render_template("logs.html")
