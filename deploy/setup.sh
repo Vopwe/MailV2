@@ -7,8 +7,8 @@ set -e
 
 APP_USER="graphenmail"
 APP_DIR="/opt/graphenmail"
-REPO_URL=""  # ← Fill in your GitHub repo URL
-DOMAIN=""    # ← Fill in your domain (e.g., mail.yourdomain.com) or leave empty for IP-only
+REPO_URL="https://github.com/Vopwe/MailV2.git"
+DOMAIN=""
 
 echo "══════════════════════════════════════════════════"
 echo "  GraphenMail — Server Setup"
