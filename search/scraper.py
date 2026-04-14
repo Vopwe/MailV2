@@ -4,10 +4,12 @@ Drop-in replacement for ai/client.py::generate_urls().
 Same function signature, same return type.
 """
 import asyncio
+import base64
 import logging
 import random
 import re
 import time
+from urllib.parse import urlparse, parse_qs
 
 import httpx
 import tldextract
@@ -33,23 +35,54 @@ SKIP_DOMAINS = {
 # Government TLD patterns
 GOV_PATTERNS = re.compile(r"\.(gov|gov\.\w+|mil|edu)$", re.IGNORECASE)
 
-# Captcha / rate-limit detection patterns in response body
+# Captcha / rate-limit detection — phrases that ONLY appear on block pages,
+# not in normal Bing search result HTML (which mentions "captcha" in scripts).
 CAPTCHA_PATTERNS = [
-    "unusual traffic",
-    "captcha",
-    "blocked",
-    "please verify",
+    "unusual traffic from your computer",
     "are you a robot",
     "automated queries",
+    "your request is blocked",
+    "please verify you are a human",
+    "suspected automated behavior",
 ]
 
 BING_SEARCH_URL = "https://www.bing.com/search"
 
 
 def _is_captcha_response(html: str) -> bool:
-    """Check if Bing returned a captcha/block page."""
+    """Check if Bing returned a captcha/block page.
+    Must match a block-page phrase AND have no organic results."""
     html_lower = html.lower()
-    return any(pattern in html_lower for pattern in CAPTCHA_PATTERNS)
+    has_block_phrase = any(p in html_lower for p in CAPTCHA_PATTERNS)
+    has_organic = "b_algo" in html_lower
+    # Only flag as captcha if we see a block phrase and NO organic results
+    return has_block_phrase and not has_organic
+
+
+def _decode_bing_redirect(href: str) -> str | None:
+    """Decode Bing tracking URL (bing.com/ck/a?...&u=base64url) to real URL."""
+    if "/ck/a?" not in href:
+        return href if href.startswith("http") else None
+
+    try:
+        parsed = urlparse(href)
+        params = parse_qs(parsed.query)
+        encoded = params.get("u", [None])[0]
+        if not encoded:
+            return None
+        # Bing uses URL-safe base64 with a prefix character (a1, L2, etc.)
+        # Strip the prefix (first 2 chars)
+        raw = encoded[2:] if len(encoded) > 2 else encoded
+        # Add padding
+        padding = 4 - len(raw) % 4
+        if padding != 4:
+            raw += "=" * padding
+        decoded = base64.urlsafe_b64decode(raw).decode("utf-8", errors="ignore")
+        if decoded.startswith("http"):
+            return decoded
+    except Exception:
+        pass
+    return None
 
 
 def _parse_bing_results(html: str) -> list[str]:
@@ -57,15 +90,42 @@ def _parse_bing_results(html: str) -> list[str]:
     urls = []
     soup = BeautifulSoup(html, "lxml")
 
-    # Primary: Bing organic results in <li class="b_algo">
     for result in soup.select("li.b_algo"):
-        link = result.select_one("h2 a[href]")
-        if link:
-            href = link.get("href", "")
-            if href.startswith("http"):
-                urls.append(href)
+        url = None
 
-    # Fallback: any <a> with cite (URL display) nearby
+        # Priority 1: <cite> element — Bing shows "domain › path › page"
+        cite = result.select_one("cite")
+        if cite:
+            cite_text = cite.get_text(strip=True)
+            # Bing uses " › " as path separator in display URLs
+            if "›" in cite_text:
+                parts = [p.strip() for p in cite_text.split("›")]
+                # First part is domain (with or without https://)
+                domain_part = parts[0]
+                path_parts = parts[1:]
+                reconstructed = domain_part.rstrip("/")
+                if path_parts:
+                    reconstructed += "/" + "/".join(path_parts)
+                # Remove trailing ellipsis
+                reconstructed = reconstructed.rstrip("…").rstrip(".")
+                if not reconstructed.startswith("http"):
+                    reconstructed = "https://" + reconstructed
+                if "." in reconstructed:
+                    url = reconstructed
+            elif cite_text.startswith("http") and "." in cite_text:
+                url = cite_text
+
+        # Priority 2: decode tracking href
+        if not url:
+            link = result.select_one("h2 a[href]")
+            if link:
+                href = link.get("href", "")
+                url = _decode_bing_redirect(href)
+
+        if url and url.startswith("http"):
+            urls.append(url)
+
+    # Fallback: cite tags outside b_algo
     if not urls:
         for cite in soup.select("cite"):
             text = cite.get_text(strip=True)
@@ -154,7 +214,7 @@ async def _scrape_bing_page(query: str, first: int = 0) -> tuple[list[str], bool
             timeout=httpx.Timeout(15.0),
             headers=headers,
             follow_redirects=True,
-            http2=True,
+            http2=False,
             verify=False,
         ) as client:
             resp = await client.get(BING_SEARCH_URL, params=params)
