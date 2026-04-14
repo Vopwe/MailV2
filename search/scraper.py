@@ -352,50 +352,62 @@ async def _scrape_query(query_str: str, target_count: int, mkt: str = "en-US", c
 
 def generate_urls(niche: str, city: str, country: str, country_tld: str = ".com", count: int = 40) -> list[str]:
     """
-    Generate URLs by scraping Bing search results.
-    DROP-IN REPLACEMENT for ai/client.py::generate_urls().
-    Same signature, same return type.
+    Generate URLs by scraping Bing + DuckDuckGo search results.
+    Uses both engines and merges results for maximum yield.
+    DDG is critical for European VPS IPs where Bing geo-targets badly.
     """
+    from search.duckduckgo import scrape_ddg
+
     # Resolve country to Bing market code to override IP-based geo-detection
     mkt, cc = _get_bing_market(country)
     logger.info(f"Bing market: {mkt} (cc={cc}) for country: {country}")
 
     queries = build_queries(niche, city, country, country_tld, count)
-    all_raw_urls = []
+    bing_urls = []
+    ddg_urls = []
 
-    # Run async scraping in a new event loop (called from sync context)
     async def _run():
-        for i, q_info in enumerate(queries):
-            query_str = q_info["query"]
-            target = q_info["results_needed"]
-            logger.info(f"Bing query [{i+1}/{len(queries)}]: {query_str}")
-            urls = await _scrape_query(query_str, target, mkt=mkt, cc=cc)
-            all_raw_urls.extend(urls)
+        # Run Bing and DDG concurrently
+        async def _bing_task():
+            for i, q_info in enumerate(queries):
+                query_str = q_info["query"]
+                target = q_info["results_needed"]
+                logger.info(f"Bing query [{i+1}/{len(queries)}]: {query_str}")
+                urls = await _scrape_query(query_str, target, mkt=mkt, cc=cc)
+                bing_urls.extend(urls)
 
-            unique_count = len(_filter_urls(all_raw_urls))
-            logger.info(f"  -> {len(urls)} raw URLs, {unique_count} unique domains so far")
+                unique_count = len(_filter_urls(bing_urls))
+                logger.info(f"  -> Bing: {len(urls)} raw, {unique_count} unique domains")
 
-            # Early exit if we have 1.5x the target (buffer for safety)
-            if unique_count >= int(count * 1.5):
-                logger.info(f"  -> Reached {unique_count} unique domains, stopping early")
-                break
+                if unique_count >= count:
+                    break
+
+        async def _ddg_task():
+            result = await scrape_ddg(niche, city, country, count=count)
+            ddg_urls.extend(result)
+
+        # Run both in parallel
+        await asyncio.gather(_bing_task(), _ddg_task())
 
     # Handle case where we're already in an event loop
     try:
         loop = asyncio.get_running_loop()
-        # We're inside an async context — just run directly
         import concurrent.futures
         with concurrent.futures.ThreadPoolExecutor() as pool:
             loop_new = asyncio.new_event_loop()
             pool.submit(loop_new.run_until_complete, _run()).result()
             loop_new.close()
     except RuntimeError:
-        # No event loop running — create one
         asyncio.run(_run())
 
-    filtered = _filter_urls(all_raw_urls)
+    # Merge: DDG first (more reliable from EU IPs), then Bing
+    all_raw = ddg_urls + [u for u in _filter_urls(bing_urls)]
+    filtered = _filter_urls(all_raw)
 
-    # Cap at requested count
     result = filtered[:count]
-    logger.info(f"Bing scraper returned {len(result)} URLs for {niche} in {city}, {country}")
+    logger.info(
+        f"URL generation complete: {len(result)} URLs "
+        f"(Bing: {len(_filter_urls(bing_urls))}, DDG: {len(ddg_urls)}) "
+        f"for {niche} in {city}, {country}"
+    )
     return result
