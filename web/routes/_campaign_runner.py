@@ -10,7 +10,7 @@ import tldextract
 import database
 import config
 import tasks
-from search.scraper import generate_urls
+from search.scraper import generate_urls_report
 from crawler.fetcher import crawl_urls
 from crawler.extractor import extract_emails
 
@@ -21,9 +21,9 @@ def _generate_for_combo(combo, urls_per_batch):
     """Worker: generate URLs for a single (niche, city, country, tld) combo."""
     niche, city, country, country_tld = combo
     try:
-        url_tuples = generate_urls(niche, city, country, country_tld, count=urls_per_batch)
+        report = generate_urls_report(niche, city, country, country_tld, count=urls_per_batch)
         rows = []
-        for url, source in url_tuples:
+        for url, source in report["tagged_urls"]:
             ext = tldextract.extract(url)
             domain = f"{ext.domain}.{ext.suffix}"
             rows.append({
@@ -34,10 +34,23 @@ def _generate_for_combo(combo, urls_per_batch):
                 "country": country,
                 "source": source,
             })
-        return rows
+        return {
+            "rows": rows,
+            "report": report,
+        }
     except Exception as e:
         logger.error(f"URL generation failed for {niche}/{city}/{country}: {e}")
-        return []
+        return {
+            "rows": [],
+            "report": {
+                "sources": {"bing": 0, "ddg": 0, "ai": 0},
+                "ai": {
+                    "status": "error",
+                    "model": config.get_setting("openrouter_model", ""),
+                    "error": str(e),
+                },
+            },
+        }
 
 
 async def run_campaign(task_id: str, campaign_id: int):
@@ -92,6 +105,7 @@ async def _run_campaign_steps(task_id: str, campaign_id: int, campaign: dict):
     )
 
     all_url_rows = []
+    url_generation_reports = []
     completed = 0
     lock = threading.Lock()
 
@@ -102,7 +116,9 @@ async def _run_campaign_steps(task_id: str, campaign_id: int, campaign: dict):
         }
         for future in as_completed(futures):
             combo = futures[future]
-            rows = future.result()
+            result = future.result()
+            rows = result["rows"]
+            url_generation_reports.append(result["report"])
             for row in rows:
                 row["campaign_id"] = campaign_id
             all_url_rows.extend(rows)
@@ -186,6 +202,7 @@ async def _run_campaign_steps(task_id: str, campaign_id: int, campaign: dict):
     else:
         crawl_stats["emails_per_domain"] = 0
     crawl_stats["deduped_domains"] = deduped_count
+    crawl_stats["url_generation"] = _build_url_generation_summary(url_generation_reports, all_url_rows)
 
     database.save_campaign_stats(campaign_id, crawl_stats)
     database.update_campaign_counts(campaign_id)
@@ -202,3 +219,42 @@ async def _run_campaign_steps(task_id: str, campaign_id: int, campaign: dict):
         msg += f" | robots.txt blocked: {crawl_stats['pages_robots_blocked']}"
 
     tasks.complete_task(task_id, msg)
+
+
+def _build_url_generation_summary(reports: list[dict], rows: list[dict]) -> dict:
+    source_counts = {"bing": 0, "ddg": 0, "ai": 0}
+    for row in rows:
+        source = row.get("source")
+        if source in source_counts:
+            source_counts[source] += 1
+
+    ai_statuses = []
+    ai_models = []
+    ai_errors = []
+    for report in reports:
+        ai_report = report.get("ai", {})
+        status = ai_report.get("status")
+        model = ai_report.get("model")
+        error = ai_report.get("error")
+        if status:
+            ai_statuses.append(status)
+        if model and model not in ai_models:
+            ai_models.append(model)
+        if error and error not in ai_errors:
+            ai_errors.append(error)
+
+    overall_ai_status = "disabled"
+    if "error" in ai_statuses:
+        overall_ai_status = "partial" if source_counts["ai"] > 0 else "error"
+    elif "ok" in ai_statuses:
+        overall_ai_status = "ok"
+
+    return {
+        "sources": source_counts,
+        "total_urls_after_dedup": len(rows),
+        "ai": {
+            "status": overall_ai_status,
+            "models": ai_models,
+            "error": ai_errors[0] if ai_errors else None,
+        },
+    }

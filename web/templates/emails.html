@@ -63,19 +63,83 @@
     </form>
 </div>
 
-<!-- Clean Up -->
-<details class="export-panel">
-    <summary class="export-panel-toggle">Clean Up <span class="toggle-arrow">&#9662;</span></summary>
-    <div class="export-panel-body">
-        <form method="post" action="/verification/bulk-delete" class="verify-action-row"
-              onsubmit="return confirm('Permanently delete all emails with selected statuses?')">
-            <label class="checkbox-label"><input type="checkbox" name="statuses" value="invalid"> Invalid</label>
-            <label class="checkbox-label"><input type="checkbox" name="statuses" value="spam_trap"> Spam Traps</label>
-            <label class="checkbox-label"><input type="checkbox" name="statuses" value="unknown"> Unknown</label>
-            <button type="submit" class="btn btn-danger btn-sm">Delete Selected</button>
-        </form>
+<div class="section">
+    <h2>Database Cleanup</h2>
+    <p class="hint" style="margin-bottom: 12px;">One cleanup flow only. Counts below come from the current Database filters, so you can see exactly what will be deleted before confirming.</p>
+
+    <div class="verify-health-grid">
+        <div class="verify-health-card">
+            <h3>Current Filter Impact</h3>
+            <form method="post" action="/emails/cleanup" id="cleanup-form">
+                {% for key in ['campaign_id', 'niche', 'country', 'city', 'verification', 'domain', 'search'] %}
+                {% if filters.get(key) %}
+                <input type="hidden" name="{{ key }}" value="{{ filters.get(key) }}">
+                {% endif %}
+                {% endfor %}
+
+                <table class="table table-sm table-compact" style="max-width: 520px;">
+                    <thead>
+                        <tr><th></th><th>Status</th><th>Matching Emails</th></tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td><input type="checkbox" name="statuses" value="invalid" onchange="updateCleanupPreview()"></td>
+                            <td><span class="badge badge-invalid">Invalid</span></td>
+                            <td data-count="{{ cleanup_counts.invalid|default(0) }}">{{ cleanup_counts.invalid|default(0) }}</td>
+                        </tr>
+                        <tr>
+                            <td><input type="checkbox" name="statuses" value="spam_trap" onchange="updateCleanupPreview()"></td>
+                            <td><span class="badge badge-spam_trap">Spam Traps</span></td>
+                            <td data-count="{{ cleanup_counts.spam_trap|default(0) }}">{{ cleanup_counts.spam_trap|default(0) }}</td>
+                        </tr>
+                    </tbody>
+                </table>
+
+                <div id="cleanup-preview" class="health-warn" style="display: none; margin-top: 12px;">
+                    <strong>Will delete <span id="cleanup-count">0</span> emails from current Database filters.</strong>
+                </div>
+
+                <button type="submit" class="btn btn-danger btn-sm" id="cleanup-btn" disabled style="margin-top: 10px;">Delete Matching Emails</button>
+            </form>
+        </div>
+
+        <div class="verify-health-card">
+            <h3>Recent Cleanup Runs</h3>
+            {% if cleanup_history %}
+            <table class="table table-sm table-compact">
+                <thead>
+                    <tr>
+                        <th>When</th>
+                        <th>Statuses</th>
+                        <th>Deleted</th>
+                        <th>Scope</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for run in cleanup_history %}
+                    <tr>
+                        <td>{{ run.created_at[:16] }}</td>
+                        <td>{{ run.statuses | join(', ') }}</td>
+                        <td>{{ run.deleted_count }}<span class="email-meta"> / {{ run.preview_count }} planned</span></td>
+                        <td>
+                            {% if run.filters %}
+                                {% for key, value in run.filters.items() %}
+                                <span class="email-meta">{{ key }}={{ value }}</span>{% if not loop.last %}<br>{% endif %}
+                                {% endfor %}
+                            {% else %}
+                                <span class="email-meta">All Database emails</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <p class="empty-state" style="margin: 0;">No cleanup runs saved yet.</p>
+            {% endif %}
+        </div>
     </div>
-</details>
+</div>
 
 <!-- Export Options -->
 <details class="export-panel">
@@ -220,6 +284,32 @@ function toggleAll(source) {
     checkboxes.forEach(cb => cb.checked = source.checked);
 }
 
+function updateCleanupPreview() {
+    const form = document.getElementById('cleanup-form');
+    if (!form) return;
+
+    const checked = form.querySelectorAll('input[name="statuses"]:checked');
+    const preview = document.getElementById('cleanup-preview');
+    const countEl = document.getElementById('cleanup-count');
+    const btn = document.getElementById('cleanup-btn');
+
+    let total = 0;
+    checked.forEach(cb => {
+        const row = cb.closest('tr');
+        const countCell = row?.querySelector('td[data-count]');
+        total += parseInt(countCell?.dataset.count || '0', 10);
+    });
+
+    if (total > 0) {
+        preview.style.display = '';
+        countEl.textContent = total;
+        btn.disabled = false;
+    } else {
+        preview.style.display = 'none';
+        btn.disabled = true;
+    }
+}
+
 function doExport() {
     const cols = [];
     document.querySelectorAll('.export-col:checked').forEach(cb => cols.push(cb.value));
@@ -259,6 +349,13 @@ document.getElementById('exclude-all-btn')?.addEventListener('click', () => {
 });
 document.getElementById('exclude-none-btn')?.addEventListener('click', () => {
     document.querySelectorAll('.exclude-provider').forEach(cb => cb.checked = false);
+});
+
+document.getElementById('cleanup-form')?.addEventListener('submit', function(e) {
+    const count = document.getElementById('cleanup-count')?.textContent || '0';
+    if (!confirm(`Permanently delete ${count} emails from the current Database filters?`)) {
+        e.preventDefault();
+    }
 });
 
 pollVerificationTask();

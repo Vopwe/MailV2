@@ -4,10 +4,12 @@ Email database — browse, filter, export CSV.
 import csv
 import io
 from urllib.parse import urlencode
-from flask import Blueprint, render_template, request, Response
+from flask import Blueprint, render_template, request, Response, redirect, url_for, flash
 import database
 
 bp = Blueprint("emails", __name__)
+
+CLEANUP_ALLOWED_STATUSES = ("invalid", "spam_trap")
 
 
 def _build_page_url(page: int) -> str:
@@ -16,22 +18,34 @@ def _build_page_url(page: int) -> str:
     return f"?{urlencode(args, doseq=True)}"
 
 
+def _parse_filters(values) -> dict:
+    campaign_id = values.get("campaign_id", type=int) if hasattr(values, "get") else None
+    if campaign_id is None:
+        raw_campaign_id = values.get("campaign_id", "") if hasattr(values, "get") else ""
+        campaign_id = int(raw_campaign_id) if str(raw_campaign_id).isdigit() else None
+
+    return {
+        "campaign_id": campaign_id,
+        "niche": (values.get("niche", "") or "").strip() or None,
+        "city": (values.get("city", "") or "").strip() or None,
+        "country": (values.get("country", "") or "").strip() or None,
+        "verification": (values.get("verification", "") or "").strip() or None,
+        "domain": (values.get("domain", "") or "").strip() or None,
+        "search": (values.get("search", "") or "").strip() or None,
+    }
+
+
+def _clean_filter_query(filters: dict) -> dict:
+    return {key: value for key, value in filters.items() if value not in (None, "", [])}
+
+
 @bp.route("/")
 def list_emails():
-    # Gather filter params
-    campaign_id = request.args.get("campaign_id", type=int)
-    niche = request.args.get("niche", "").strip() or None
-    city = request.args.get("city", "").strip() or None
-    country = request.args.get("country", "").strip() or None
-    verification = request.args.get("verification", "").strip() or None
-    domain = request.args.get("domain", "").strip() or None
-    search = request.args.get("search", "").strip() or None
+    filters_dict = _parse_filters(request.args)
     page = request.args.get("page", 1, type=int)
 
     emails_list, total = database.get_emails(
-        campaign_id=campaign_id, niche=niche, city=city,
-        country=country, verification=verification, domain=domain,
-        search=search, page=page, per_page=50,
+        page=page, per_page=50, **filters_dict,
     )
 
     total_pages = (total + 49) // 50
@@ -46,6 +60,8 @@ def list_emails():
     niches = database.get_distinct_values("niche")
     cities = database.get_distinct_values("city")
     countries = database.get_distinct_values("country")
+    cleanup_counts = database.get_email_status_counts(**filters_dict)
+    cleanup_history = database.get_cleanup_runs(limit=8)
     prev_url = _build_page_url(page - 1) if page > 1 else None
     next_url = _build_page_url(page + 1) if page < total_pages else None
 
@@ -55,25 +71,47 @@ def list_emails():
                            campaigns=campaigns, niches=niches,
                            cities=cities, countries=countries,
                            filters=request.args,
+                           cleanup_counts=cleanup_counts,
+                           cleanup_history=cleanup_history,
+                           cleanup_statuses=CLEANUP_ALLOWED_STATUSES,
                            prev_url=prev_url,
                            next_url=next_url)
 
 
+@bp.route("/cleanup", methods=["POST"])
+def cleanup():
+    statuses = [s for s in request.form.getlist("statuses") if s in CLEANUP_ALLOWED_STATUSES]
+    if not statuses:
+        flash("Select at least one cleanup status.", "error")
+        return redirect(url_for("emails.list_emails", **_clean_filter_query(_parse_filters(request.form))))
+
+    filters_dict = _parse_filters(request.form)
+    preview_count = database.count_emails_for_cleanup(statuses=statuses, **filters_dict)
+    if preview_count == 0:
+        flash("No matching emails to delete for the current Database filters.", "warning")
+        return redirect(url_for("emails.list_emails", **_clean_filter_query(filters_dict)))
+
+    deleted_count = database.delete_emails_for_cleanup(statuses=statuses, **filters_dict)
+    database.save_cleanup_run(
+        statuses=statuses,
+        filters=_clean_filter_query(filters_dict),
+        preview_count=preview_count,
+        deleted_count=deleted_count,
+    )
+    for campaign in database.get_campaigns():
+        database.update_campaign_counts(campaign["id"])
+
+    flash(f"Deleted {deleted_count} emails from the current Database view.", "success")
+    return redirect(url_for("emails.list_emails", **_clean_filter_query(filters_dict)))
+
+
 @bp.route("/export")
 def export_csv():
-    campaign_id = request.args.get("campaign_id", type=int)
-    niche = request.args.get("niche", "").strip() or None
-    city = request.args.get("city", "").strip() or None
-    country = request.args.get("country", "").strip() or None
-    verification = request.args.get("verification", "").strip() or None
-    domain = request.args.get("domain", "").strip() or None
+    filters_dict = _parse_filters(request.args)
     exclude_providers = request.args.get("exclude_providers", "").strip()
     columns_param = request.args.get("columns", "").strip()
 
-    rows = database.get_all_emails_filtered(
-        campaign_id=campaign_id, niche=niche, city=city,
-        country=country, verification=verification, domain=domain,
-    )
+    rows = database.get_all_emails_filtered(**filters_dict)
 
     # Filter out excluded provider domains
     if exclude_providers:

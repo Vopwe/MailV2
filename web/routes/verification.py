@@ -98,18 +98,8 @@ async def _run_verification(task_id: str, email_ids: list[int] | None,
 
 @bp.route("/bulk-delete", methods=["POST"])
 def bulk_delete():
-    statuses = request.form.getlist("statuses")
-    allowed = {"invalid", "spam_trap"}
-    statuses = [s for s in statuses if s in allowed]
-    if not statuses:
-        flash("No statuses selected.", "error")
-        return redirect(url_for("verification.index"))
-    count = database.bulk_delete_emails(statuses)
-    # Update campaign counts
-    for c in database.get_campaigns():
-        database.update_campaign_counts(c["id"])
-    flash(f"Deleted {count} emails ({', '.join(statuses)}).", "success")
-    return redirect(url_for("verification.index"))
+    flash("Cleanup moved to the Database page so it stays tied to visible email counts and filters.", "warning")
+    return redirect(url_for("emails.list_emails"))
 
 
 @bp.route("/", methods=["GET", "POST"])

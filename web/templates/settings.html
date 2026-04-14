@@ -6,6 +6,29 @@
     <h1>Settings</h1>
 </div>
 
+<div class="section" style="margin-bottom: 16px;">
+    <h2>Runtime Files</h2>
+    <p class="hint" style="margin-bottom: 10px;">These are the exact files this app instance reads and writes. If saved API keys or emails look missing, check these paths first.</p>
+    <div class="verify-health-grid">
+        <div class="verify-health-card">
+            <span class="export-group-label">Settings JSON</span>
+            <div class="email-meta">{{ runtime_paths.settings }}</div>
+        </div>
+        <div class="verify-health-card">
+            <span class="export-group-label">Database</span>
+            <div class="email-meta">{{ runtime_paths.database }}</div>
+        </div>
+        <div class="verify-health-card">
+            <span class="export-group-label">Server Log</span>
+            <div class="email-meta">{{ runtime_paths.server_out_log }}</div>
+        </div>
+        <div class="verify-health-card">
+            <span class="export-group-label">Error Log</span>
+            <div class="email-meta">{{ runtime_paths.server_err_log }}</div>
+        </div>
+    </div>
+</div>
+
 <form method="post" class="form-card">
     <div class="settings-tabs">
         <button type="button" class="settings-tab active" data-tab="bing">Bing Scraper</button>

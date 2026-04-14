@@ -94,6 +94,15 @@ def init_db():
             created_at  TEXT NOT NULL DEFAULT (datetime('now'))
         );
 
+        CREATE TABLE IF NOT EXISTS cleanup_runs (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            statuses      TEXT NOT NULL,
+            filters       TEXT NOT NULL,
+            preview_count INTEGER NOT NULL DEFAULT 0,
+            deleted_count INTEGER NOT NULL DEFAULT 0,
+            created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+
         CREATE TABLE IF NOT EXISTS task_status (
             task_id      TEXT PRIMARY KEY,
             task_type    TEXT NOT NULL DEFAULT '',
@@ -320,32 +329,15 @@ def get_emails(campaign_id: int | None = None, niche: str | None = None,
                search: str | None = None,
                page: int = 1, per_page: int = 50) -> tuple[list[dict], int]:
     db = get_db()
-    conditions = []
-    params = []
-
-    if campaign_id:
-        conditions.append("campaign_id = ?")
-        params.append(campaign_id)
-    if niche:
-        conditions.append("niche = ?")
-        params.append(niche)
-    if city:
-        conditions.append("city = ?")
-        params.append(city)
-    if country:
-        conditions.append("country = ?")
-        params.append(country)
-    if verification:
-        conditions.append("verification = ?")
-        params.append(verification)
-    if domain:
-        conditions.append("domain LIKE ?")
-        params.append(f"%{domain}%")
-    if search:
-        conditions.append("email LIKE ?")
-        params.append(f"%{search}%")
-
-    where = " WHERE " + " AND ".join(conditions) if conditions else ""
+    where, params = _build_email_where(
+        campaign_id=campaign_id,
+        niche=niche,
+        city=city,
+        country=country,
+        verification=verification,
+        domain=domain,
+        search=search,
+    )
 
     total = db.execute(f"SELECT COUNT(*) FROM emails{where}", params).fetchone()[0]
 
@@ -360,10 +352,30 @@ def get_emails(campaign_id: int | None = None, niche: str | None = None,
 
 def get_all_emails_filtered(campaign_id: int | None = None, niche: str | None = None,
                             city: str | None = None, country: str | None = None,
-                            verification: str | None = None, domain: str | None = None) -> list[dict]:
+                            verification: str | None = None, domain: str | None = None,
+                            search: str | None = None) -> list[dict]:
     db = get_db()
+    where, params = _build_email_where(
+        campaign_id=campaign_id,
+        niche=niche,
+        city=city,
+        country=country,
+        verification=verification,
+        domain=domain,
+        search=search,
+    )
+    rows = db.execute(f"SELECT * FROM emails{where} ORDER BY extracted_at DESC", params).fetchall()
+    return [dict(r) for r in rows]
+
+
+def _build_email_where(campaign_id: int | None = None, niche: str | None = None,
+                       city: str | None = None, country: str | None = None,
+                       verification: str | None = None, domain: str | None = None,
+                       search: str | None = None,
+                       verification_statuses: list[str] | None = None) -> tuple[str, list]:
     conditions = []
     params = []
+
     if campaign_id:
         conditions.append("campaign_id = ?")
         params.append(campaign_id)
@@ -379,12 +391,43 @@ def get_all_emails_filtered(campaign_id: int | None = None, niche: str | None = 
     if verification:
         conditions.append("verification = ?")
         params.append(verification)
+    if verification_statuses:
+        placeholders = ",".join("?" for _ in verification_statuses)
+        conditions.append(f"verification IN ({placeholders})")
+        params.extend(verification_statuses)
     if domain:
         conditions.append("domain LIKE ?")
         params.append(f"%{domain}%")
+    if search:
+        conditions.append("email LIKE ?")
+        params.append(f"%{search}%")
+
     where = " WHERE " + " AND ".join(conditions) if conditions else ""
-    rows = db.execute(f"SELECT * FROM emails{where} ORDER BY extracted_at DESC", params).fetchall()
-    return [dict(r) for r in rows]
+    return where, params
+
+
+def get_email_status_counts(campaign_id: int | None = None, niche: str | None = None,
+                            city: str | None = None, country: str | None = None,
+                            verification: str | None = None, domain: str | None = None,
+                            search: str | None = None) -> dict[str, int]:
+    db = get_db()
+    where, params = _build_email_where(
+        campaign_id=campaign_id,
+        niche=niche,
+        city=city,
+        country=country,
+        verification=verification,
+        domain=domain,
+        search=search,
+    )
+    rows = db.execute(
+        f"SELECT verification, COUNT(*) AS cnt FROM emails{where} GROUP BY verification",
+        params,
+    ).fetchall()
+    counts = {r["verification"]: r["cnt"] for r in rows if r["verification"]}
+    for status in ("invalid", "spam_trap", "unknown", "unverified", "valid", "risky"):
+        counts.setdefault(status, 0)
+    return counts
 
 
 def update_email_verification(email_id: int, verification: str,
@@ -568,6 +611,84 @@ def bulk_delete_emails(verification_statuses: list[str]) -> int:
             verification_statuses,
         )
     return count
+
+
+def count_emails_for_cleanup(statuses: list[str], campaign_id: int | None = None,
+                             niche: str | None = None, city: str | None = None,
+                             country: str | None = None, verification: str | None = None,
+                             domain: str | None = None, search: str | None = None) -> int:
+    if not statuses:
+        return 0
+    where, params = _build_email_where(
+        campaign_id=campaign_id,
+        niche=niche,
+        city=city,
+        country=country,
+        verification=verification,
+        domain=domain,
+        search=search,
+        verification_statuses=statuses,
+    )
+    return get_db().execute(f"SELECT COUNT(*) FROM emails{where}", params).fetchone()[0]
+
+
+def delete_emails_for_cleanup(statuses: list[str], campaign_id: int | None = None,
+                              niche: str | None = None, city: str | None = None,
+                              country: str | None = None, verification: str | None = None,
+                              domain: str | None = None, search: str | None = None) -> int:
+    if not statuses:
+        return 0
+    where, params = _build_email_where(
+        campaign_id=campaign_id,
+        niche=niche,
+        city=city,
+        country=country,
+        verification=verification,
+        domain=domain,
+        search=search,
+        verification_statuses=statuses,
+    )
+    count = get_db().execute(f"SELECT COUNT(*) FROM emails{where}", params).fetchone()[0]
+    if count == 0:
+        return 0
+    with _write_db() as db:
+        db.execute(f"DELETE FROM emails{where}", params)
+    return count
+
+
+def save_cleanup_run(statuses: list[str], filters: dict,
+                     preview_count: int, deleted_count: int):
+    with _write_db() as db:
+        db.execute(
+            """INSERT INTO cleanup_runs (statuses, filters, preview_count, deleted_count)
+               VALUES (?, ?, ?, ?)""",
+            (
+                json.dumps(statuses),
+                json.dumps(filters, sort_keys=True),
+                preview_count,
+                deleted_count,
+            ),
+        )
+
+
+def get_cleanup_runs(limit: int = 10) -> list[dict]:
+    rows = get_db().execute(
+        "SELECT * FROM cleanup_runs ORDER BY created_at DESC, id DESC LIMIT ?",
+        (limit,),
+    ).fetchall()
+    results = []
+    for row in rows:
+        item = dict(row)
+        try:
+            item["statuses"] = json.loads(item["statuses"])
+        except (json.JSONDecodeError, TypeError):
+            item["statuses"] = []
+        try:
+            item["filters"] = json.loads(item["filters"])
+        except (json.JSONDecodeError, TypeError):
+            item["filters"] = {}
+        results.append(item)
+    return results
 
 
 def get_distinct_values(column: str) -> list[str]:

@@ -66,4 +66,11 @@ def index():
         pass
 
     has_password = bool(get_app_password())
-    return render_template("settings.html", settings=settings, has_password=has_password, ip_status=ip_status)
+    runtime_paths = config.get_runtime_paths()
+    return render_template(
+        "settings.html",
+        settings=settings,
+        has_password=has_password,
+        ip_status=ip_status,
+        runtime_paths=runtime_paths,
+    )

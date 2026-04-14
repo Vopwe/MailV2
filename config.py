@@ -183,6 +183,15 @@ def get_all_settings() -> dict:
     return defaults
 
 
+def get_runtime_paths() -> dict:
+    return {
+        "settings": SETTINGS_PATH,
+        "database": DATABASE_PATH,
+        "server_out_log": os.path.join(BASE_DIR, "server.out.log"),
+        "server_err_log": os.path.join(BASE_DIR, "server.err.log"),
+    }
+
+
 # ─── Location Data ────────────────────────────────────────────────────
 
 _locations_cache = None

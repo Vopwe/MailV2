@@ -462,4 +462,129 @@ def generate_urls(niche: str, city: str, country: str, country_tld: str = ".com"
     return result
 
 
+def generate_urls_report(niche: str, city: str, country: str, country_tld: str = ".com", count: int = 40) -> dict:
+    """
+    Generate URLs plus AI/source metadata for campaign health reporting.
+    """
+    from search.duckduckgo import scrape_ddg
+    from search.ai_generator import generate_ai_urls_with_meta
+
+    mkt, cc = _get_bing_market(country)
+    logger.info(f"Bing market: {mkt} (cc={cc}) for country: {country}")
+
+    queries = build_queries(niche, city, country, country_tld, count)
+    bing_urls = []
+    ddg_urls = []
+    ai_urls = []
+    ai_meta = {
+        "status": "disabled",
+        "model": config.get_setting("openrouter_model", ""),
+        "error": None,
+    }
+
+    async def _run():
+        async def _bing_task():
+            for i, q_info in enumerate(queries):
+                query_str = q_info["query"]
+                target = q_info["results_needed"]
+                logger.info(f"Bing query [{i+1}/{len(queries)}]: {query_str}")
+                urls = await _scrape_query(query_str, target, mkt=mkt, cc=cc)
+                bing_urls.extend(urls)
+
+                unique_count = len(_filter_urls(bing_urls))
+                logger.info(f"  -> Bing: {len(urls)} raw, {unique_count} unique domains")
+
+                if unique_count >= count:
+                    break
+
+        async def _ddg_task():
+            result = await scrape_ddg(niche, city, country, count=count)
+            ddg_urls.extend(result)
+
+        await asyncio.gather(_bing_task(), _ddg_task())
+
+        seen_domains = set()
+        for url in ddg_urls:
+            ext = tldextract.extract(url)
+            domain = f"{ext.domain}.{ext.suffix}"
+            if domain not in SKIP_DOMAINS:
+                seen_domains.add(domain)
+        for url in _filter_urls(bing_urls):
+            ext = tldextract.extract(url)
+            domain = f"{ext.domain}.{ext.suffix}"
+            seen_domains.add(domain)
+
+        remaining = count - len(seen_domains)
+        if remaining > 0:
+            logger.info(f"Bing+DDG found {len(seen_domains)} URLs, AI filling {remaining} more")
+            result = await generate_ai_urls_with_meta(niche, city, country, count=remaining)
+            ai_meta.update({
+                "status": result["status"],
+                "model": result["model"],
+                "error": result["error"],
+            })
+            ai_urls.extend(result["urls"])
+        else:
+            ai_meta.update({
+                "status": "ok" if config.get_setting("openrouter_api_key", "").strip() else "disabled",
+                "error": None,
+            })
+            logger.info(f"Bing+DDG found {len(seen_domains)} URLs — no AI needed")
+
+    try:
+        loop = asyncio.get_running_loop()
+        import concurrent.futures
+        with concurrent.futures.ThreadPoolExecutor() as pool:
+            loop_new = asyncio.new_event_loop()
+            pool.submit(loop_new.run_until_complete, _run()).result()
+            loop_new.close()
+    except RuntimeError:
+        asyncio.run(_run())
+
+    tagged = []
+    seen_domains = set()
+
+    for url in ddg_urls:
+        ext = tldextract.extract(url)
+        domain = f"{ext.domain}.{ext.suffix}"
+        if domain not in seen_domains and domain not in SKIP_DOMAINS:
+            seen_domains.add(domain)
+            tagged.append((url, "ddg"))
+
+    for url in ai_urls:
+        ext = tldextract.extract(url)
+        domain = f"{ext.domain}.{ext.suffix}"
+        if domain not in seen_domains and domain not in SKIP_DOMAINS:
+            seen_domains.add(domain)
+            tagged.append((url, "ai"))
+
+    for url in _filter_urls(bing_urls):
+        ext = tldextract.extract(url)
+        domain = f"{ext.domain}.{ext.suffix}"
+        if domain not in seen_domains:
+            seen_domains.add(domain)
+            tagged.append((url, "bing"))
+
+    result = tagged[:count]
+    source_counts = {
+        "bing": sum(1 for _, source in result if source == "bing"),
+        "ddg": sum(1 for _, source in result if source == "ddg"),
+        "ai": sum(1 for _, source in result if source == "ai"),
+    }
+    logger.info(
+        "URL generation report: %s URLs (Bing: %s, DDG: %s, AI: %s) for %s in %s, %s",
+        len(result),
+        source_counts["bing"],
+        source_counts["ddg"],
+        source_counts["ai"],
+        niche,
+        city,
+        country,
+    )
+    return {
+        "tagged_urls": result,
+        "sources": source_counts,
+        "ai": ai_meta,
+    }
+
 

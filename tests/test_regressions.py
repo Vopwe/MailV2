@@ -12,7 +12,9 @@ import uuid
 
 import config
 import database
+import logging_setup
 import tasks
+from search.ai_generator import generate_ai_urls_with_meta
 from verification import verifier
 from web import create_app
 from web.routes._campaign_runner import run_campaign
@@ -246,6 +248,144 @@ class RegressionTests(unittest.TestCase):
             attempts,
             [(("mx1.example.com", 25), 3.0), (("mx2.example.com", 25), 3.0)],
         )
+
+    def test_database_cleanup_uses_current_filters_and_records_run(self):
+        app = create_app()
+        app.testing = True
+        client = app.test_client()
+        campaign_id = database.insert_campaign("Cleanup", ["agency"], ["USA"], ["Seattle", "Portland"])
+
+        rows = [
+            ("bad-sea@example.com", "invalid", "Seattle"),
+            ("trap-sea@example.com", "spam_trap", "Seattle"),
+            ("bad-portland@example.com", "invalid", "Portland"),
+            ("good-sea@example.com", "valid", "Seattle"),
+        ]
+        for email, status, city in rows:
+            database.insert_email(
+                email=email,
+                domain="example.com",
+                source_url="https://example.com/contact",
+                source_domain="example.com",
+                campaign_id=campaign_id,
+                niche="agency",
+                city=city,
+                country="USA",
+            )
+            email_row = database.get_all_emails_filtered(search=email)[0]
+            database.update_email_verification(
+                email_id=email_row["id"],
+                verification=status,
+                mx_valid=1,
+                smtp_valid=1,
+                verification_method="smtp" if status != "spam_trap" else "spam_trap",
+                mailbox_confidence="high",
+                domain_confidence="high",
+                is_catch_all=0,
+            )
+
+        response = client.post(
+            "/emails/cleanup",
+            data={
+                "campaign_id": str(campaign_id),
+                "city": "Seattle",
+                "statuses": ["invalid", "spam_trap"],
+            },
+            follow_redirects=False,
+        )
+
+        self.assertEqual(response.status_code, 302)
+        remaining = database.get_all_emails_filtered(campaign_id=campaign_id)
+        remaining_addresses = {row["email"] for row in remaining}
+        self.assertEqual(remaining_addresses, {"bad-portland@example.com", "good-sea@example.com"})
+
+        cleanup_runs = database.get_cleanup_runs(limit=1)
+        self.assertEqual(cleanup_runs[0]["preview_count"], 2)
+        self.assertEqual(cleanup_runs[0]["deleted_count"], 2)
+        self.assertEqual(cleanup_runs[0]["filters"]["city"], "Seattle")
+
+    def test_openrouter_retries_fallback_model_and_returns_meta(self):
+        class _Response:
+            def __init__(self, status_code, text="", payload=None):
+                self.status_code = status_code
+                self.text = text
+                self._payload = payload or {}
+
+            def json(self):
+                return self._payload
+
+        class _ClientStub:
+            def __init__(self, responses):
+                self._responses = list(responses)
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb):
+                return False
+
+            async def post(self, *args, **kwargs):
+                return self._responses.pop(0)
+
+        responses = [
+            _Response(404, text="model not found"),
+            _Response(
+                200,
+                payload={"choices": [{"message": {"content": "https://alpha.example\nhttps://beta.example"}}]},
+            ),
+        ]
+
+        with patch("search.ai_generator._get_api_key", return_value="sk-test"), \
+             patch("search.ai_generator._candidate_models", return_value=["bad-model", "good-model"]), \
+             patch("search.ai_generator.httpx.AsyncClient", return_value=_ClientStub(responses)):
+            result = asyncio.run(generate_ai_urls_with_meta("agency", "Seattle", "USA", count=2))
+
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["model"], "good-model")
+        self.assertEqual(result["urls"], ["https://alpha.example", "https://beta.example"])
+
+    def test_campaign_stats_include_url_generation_summary(self):
+        campaign_id = database.insert_campaign("AI stats", ["agency"], ["USA"], ["Seattle"])
+        task_id = tasks.create_task("campaign", campaign_id=campaign_id)
+
+        fake_report = {
+            "tagged_urls": [("https://alpha.example", "ai"), ("https://beta.example", "ddg")],
+            "sources": {"bing": 0, "ddg": 1, "ai": 1},
+            "ai": {
+                "status": "error",
+                "model": "bad-model",
+                "error": "HTTP 404",
+            },
+        }
+        fake_stats = {
+            "domains_reachable": 0,
+            "domains_total": 2,
+            "pages_fetched": 0,
+            "pages_failed": 2,
+            "pages_discovered": 0,
+            "pages_robots_blocked": 0,
+        }
+
+        with patch("web.routes._campaign_runner.config.get_locations", return_value={"USA": {"tld": ".com", "cities": ["Seattle"]}}), \
+             patch("web.routes._campaign_runner.generate_urls_report", return_value=fake_report), \
+             patch("web.routes._campaign_runner.crawl_urls", new=AsyncMock(return_value=({}, fake_stats))):
+            asyncio.run(run_campaign(task_id, campaign_id))
+
+        stats = database.get_campaign_stats(campaign_id)
+        self.assertEqual(stats["url_generation"]["sources"]["ai"], 1)
+        self.assertEqual(stats["url_generation"]["sources"]["ddg"], 1)
+        self.assertEqual(stats["url_generation"]["ai"]["status"], "partial")
+        self.assertEqual(stats["url_generation"]["ai"]["error"], "HTTP 404")
+
+    def test_logging_setup_adds_server_log_handlers(self):
+        logging_setup.setup_logging()
+        base_files = {
+            os.path.basename(getattr(handler, "baseFilename", ""))
+            for handler in logging_setup.logging.getLogger().handlers
+            if getattr(handler, "baseFilename", None)
+        }
+        self.assertIn("server.out.log", base_files)
+        self.assertIn("server.err.log", base_files)
 
 
 if __name__ == "__main__":

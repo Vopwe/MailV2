@@ -98,6 +98,21 @@
 <!-- ─── Crawl Health ─────────────────────────────────── -->
 <div class="section">
     <h2>Crawl Health</h2>
+    {% if crawl_stats.get('url_generation') and crawl_stats.get('url_generation').get('ai') %}
+    {% set ai_meta = crawl_stats.get('url_generation').get('ai', {}) %}
+    <p class="hint" style="margin-bottom: 12px;">
+        AI source:
+        <span class="badge badge-{{ 'valid' if ai_meta.get('status') == 'ok' else 'risky' if ai_meta.get('status') == 'partial' else 'invalid' if ai_meta.get('status') == 'error' else 'unknown' }}">
+            {{ ai_meta.get('status', 'unknown') }}
+        </span>
+        {% if ai_meta.get('models') %}
+        <span class="email-meta">Model{% if ai_meta.get('models')|length > 1 %}s{% endif %}: {{ ai_meta.get('models') | join(', ') }}</span>
+        {% endif %}
+        {% if ai_meta.get('error') %}
+        <span class="email-meta">| {{ ai_meta.get('error') }}</span>
+        {% endif %}
+    </p>
+    {% endif %}
 
     <div class="verify-health-grid">
         <div class="verify-health-card">
@@ -198,6 +213,7 @@
         {% set ddg_count = urls | selectattr('source', 'equalto', 'ddg') | list | length %}
         {% set ai_count = urls | selectattr('source', 'equalto', 'ai') | list | length %}
         {% set unknown_count = urls | length - bing_count - ddg_count - ai_count %}
+        {% set url_generation = crawl_stats.get('url_generation') if crawl_stats else None %}
         <p class="hint" style="margin-bottom: 8px;">
             Sources:
             {% if ddg_count %}<span class="badge badge-valid">DDG: {{ ddg_count }}</span> {% endif %}
@@ -205,6 +221,21 @@
             {% if ai_count %}<span class="badge" style="background: var(--purple, #8b5cf6); color: #fff;">AI: {{ ai_count }}</span> {% endif %}
             {% if unknown_count > 0 %}<span class="badge">Other: {{ unknown_count }}</span> {% endif %}
         </p>
+        {% if url_generation and url_generation.get('ai') %}
+        {% set ai_meta = url_generation.get('ai', {}) %}
+        <div class="health-warn" style="margin-bottom: 12px;">
+            <strong>AI URL generation:</strong>
+            <span class="badge badge-{{ 'valid' if ai_meta.get('status') == 'ok' else 'risky' if ai_meta.get('status') == 'partial' else 'invalid' if ai_meta.get('status') == 'error' else 'unknown' }}">
+                {{ ai_meta.get('status', 'unknown') }}
+            </span>
+            {% if ai_meta.get('models') %}
+            <span class="email-meta">Model{% if ai_meta.get('models')|length > 1 %}s{% endif %}: {{ ai_meta.get('models') | join(', ') }}</span>
+            {% endif %}
+            {% if ai_meta.get('error') %}
+            <div class="email-meta" style="margin-top: 6px;">{{ ai_meta.get('error') }}</div>
+            {% endif %}
+        </div>
+        {% endif %}
         <table class="table table-sm table-compact">
             <thead>
                 <tr>

@@ -6,10 +6,12 @@ from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 import config
 import database
+from logging_setup import setup_logging
 import tasks
 
 
 def create_app() -> Flask:
+    setup_logging()
     app = Flask(
         __name__,
         static_folder="static",

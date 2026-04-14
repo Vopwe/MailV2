@@ -5,20 +5,15 @@ Open: http://localhost:5000
 """
 import sys
 import os
-import logging
 
 # Ensure project root is on the path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    datefmt="%H:%M:%S",
-)
+from logging_setup import setup_logging
 
 from web import create_app
 
+setup_logging()
 app = create_app()
 
 if __name__ == "__main__":

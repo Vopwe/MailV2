@@ -60,41 +60,6 @@
     </div>
 </div>
 
-<div class="section">
-    <h2>Cleanup — Delete Emails</h2>
-    <p class="hint" style="margin-bottom: 12px;">Select email categories to permanently delete. This cannot be undone.</p>
-
-    <form method="post" action="/verification/bulk-delete" id="cleanup-form">
-        <table class="table table-sm table-compact" style="max-width: 500px;">
-            <thead>
-                <tr><th></th><th>Status</th><th>Count</th></tr>
-            </thead>
-            <tbody>
-                <tr>
-                    <td><input type="checkbox" name="statuses" value="invalid" id="del-invalid" onchange="updateCleanupPreview()"></td>
-                    <td><label for="del-invalid"><span class="badge badge-invalid">Invalid</span></label></td>
-                    <td data-count="{{ stats.invalid_emails|default(0) }}">{{ stats.invalid_emails|default(0) }}</td>
-                </tr>
-                <tr>
-                    <td><input type="checkbox" name="statuses" value="spam_trap" id="del-spam" onchange="updateCleanupPreview()"></td>
-                    <td><label for="del-spam"><span class="badge badge-spam_trap">Spam Traps</span></label></td>
-                    <td data-count="{{ stats.spam_trap_emails|default(0) }}">{{ stats.spam_trap_emails|default(0) }}</td>
-                </tr>
-            </tbody>
-        </table>
-
-        <div id="cleanup-preview" style="margin-top: 12px; display: none;">
-            <p class="hint" style="color: var(--danger);">
-                <strong>&lrm;⚠ Will delete <span id="cleanup-count">0</span> emails permanently.</strong>
-            </p>
-        </div>
-
-        <button type="submit" class="btn btn-danger" id="cleanup-btn" disabled style="margin-top: 8px;">
-            Delete Selected
-        </button>
-    </form>
-</div>
-
 <!-- ─── Verification Health Monitor ──────────────────────────── -->
 {% if verify_history %}
 <div class="section">
@@ -292,38 +257,6 @@ document.getElementById('verify-form')?.addEventListener('submit', function(e) {
             return;
         }
         actionField.value = campaign ? 'reverify_all_campaign' : 'reverify_all';
-    }
-});
-
-// Cleanup preview
-function updateCleanupPreview() {
-    const form = document.getElementById('cleanup-form');
-    const checked = form.querySelectorAll('input[name="statuses"]:checked');
-    const preview = document.getElementById('cleanup-preview');
-    const countEl = document.getElementById('cleanup-count');
-    const btn = document.getElementById('cleanup-btn');
-
-    let total = 0;
-    checked.forEach(cb => {
-        const row = cb.closest('tr');
-        const countCell = row.querySelector('td[data-count]');
-        total += parseInt(countCell?.dataset.count || '0', 10);
-    });
-
-    if (total > 0) {
-        preview.style.display = '';
-        countEl.textContent = total;
-        btn.disabled = false;
-    } else {
-        preview.style.display = 'none';
-        btn.disabled = true;
-    }
-}
-
-document.getElementById('cleanup-form')?.addEventListener('submit', function(e) {
-    const count = document.getElementById('cleanup-count')?.textContent || '0';
-    if (!confirm(`Permanently delete ${count} emails? This cannot be undone.`)) {
-        e.preventDefault();
     }
 });
 
