@@ -15,12 +15,14 @@ logger = logging.getLogger(__name__)
 
 OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions"
 
-# Free models to try in order of preference
+# Current preferred free models.
+# Keep router first for best uptime, then strong specific fallbacks.
 FREE_MODELS = [
-    "google/gemma-3-1b-it:free",
-    "meta-llama/llama-3.1-8b-instruct:free",
-    "mistralai/mistral-small-3.1-24b-instruct:free",
-    "google/gemma-3-4b-it:free",
+    "openrouter/free",
+    "google/gemma-4-31b-it:free",
+    "openai/gpt-oss-120b:free",
+    "nvidia/nemotron-3-super-120b-a12b:free",
+    "openai/gpt-oss-20b:free",
 ]
 
 
@@ -82,7 +84,8 @@ async def generate_ai_urls_with_meta(niche: str, city: str, country: str, count:
         return {
             "urls": [],
             "status": "disabled",
-            "model": _get_model(),
+            "requested_model": _get_model(),
+            "actual_model": None,
             "error": "OpenRouter API key not configured",
         }
 
@@ -115,14 +118,19 @@ async def generate_ai_urls_with_meta(niche: str, city: str, country: str, count:
                     continue
 
                 data = resp.json()
+                actual_model = data.get("model") or model
                 content = _extract_content(data)
                 urls = _parse_urls(content)
                 if urls:
-                    logger.info("OpenRouter AI: generated %s URLs with %s", len(urls), model)
+                    logger.info(
+                        "OpenRouter AI: generated %s URLs with requested=%s actual=%s",
+                        len(urls), model, actual_model,
+                    )
                     return {
                         "urls": urls,
                         "status": "ok",
-                        "model": model,
+                        "requested_model": _get_model(),
+                        "actual_model": actual_model,
                         "error": None,
                     }
 
@@ -135,14 +143,16 @@ async def generate_ai_urls_with_meta(niche: str, city: str, country: str, count:
         return {
             "urls": [],
             "status": "error",
-            "model": _get_model(),
+            "requested_model": _get_model(),
+            "actual_model": None,
             "error": str(e),
         }
 
     return {
         "urls": [],
         "status": "error",
-        "model": _get_model(),
+        "requested_model": _get_model(),
+        "actual_model": None,
         "error": " | ".join(errors)[:500] if errors else "OpenRouter returned no URLs",
     }
 

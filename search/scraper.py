@@ -194,6 +194,15 @@ def _parse_bing_results(html: str) -> list[str]:
                 href = link.get("href", "")
                 url = _decode_bing_redirect(href)
 
+        # Priority 3: generic result anchors inside b_algo
+        if not url:
+            for link in result.select("a[href]"):
+                href = link.get("href", "")
+                decoded = _decode_bing_redirect(href)
+                if decoded and decoded.startswith("http"):
+                    url = decoded
+                    break
+
         if url and url.startswith("http"):
             urls.append(url)
 
@@ -253,11 +262,14 @@ async def _scrape_bing_page(query: str, first: int = 0, mkt: str = "en-US", cc: 
     delay_min = float(config.get_setting("bing_delay_min", config.BING_DELAY_MIN))
     delay_max = float(config.get_setting("bing_delay_max", config.BING_DELAY_MAX))
 
-    # Bing returns ~10 organic results per page.
+    results_per_page = int(config.get_setting("bing_results_per_page", config.BING_RESULTS_PER_PAGE))
+    results_per_page = max(10, min(results_per_page, 50))
+
+    # Bing returns ~10-50 results per page depending on count param.
     # mkt + cc override IP-based geo-detection (critical for European VPS IPs).
     params = {
         "q": query,
-        "count": "10",
+        "count": str(results_per_page),
         "setlang": mkt.split("-")[0],  # language part of market code
         "mkt": mkt,
         "cc": cc,
@@ -327,10 +339,12 @@ async def _scrape_bing_page(query: str, first: int = 0, mkt: str = "en-US", cc: 
 async def _scrape_query(query_str: str, target_count: int, mkt: str = "en-US", cc: str = "US") -> list[str]:
     """Scrape multiple Bing pages for a single query until target_count URLs or exhausted."""
     all_urls = []
-    max_pages = 5  # Scrape up to 5 pages (~50 results max)
+    results_per_page = int(config.get_setting("bing_results_per_page", config.BING_RESULTS_PER_PAGE))
+    results_per_page = max(10, min(results_per_page, 50))
+    max_pages = max(5, min(12, (target_count // max(results_per_page, 1)) + 3))
 
     for page_num in range(max_pages):
-        first = page_num * 10  # Bing uses 'first' offset (10 per page)
+        first = page_num * results_per_page
         page_urls, was_blocked = await _scrape_bing_page(query_str, first=first, mkt=mkt, cc=cc)
 
         if was_blocked:
@@ -478,7 +492,8 @@ def generate_urls_report(niche: str, city: str, country: str, country_tld: str =
     ai_urls = []
     ai_meta = {
         "status": "disabled",
-        "model": config.get_setting("openrouter_model", ""),
+        "requested_model": config.get_setting("openrouter_model", ""),
+        "actual_model": None,
         "error": None,
     }
 
@@ -520,13 +535,16 @@ def generate_urls_report(niche: str, city: str, country: str, country_tld: str =
             result = await generate_ai_urls_with_meta(niche, city, country, count=remaining)
             ai_meta.update({
                 "status": result["status"],
-                "model": result["model"],
+                "requested_model": result["requested_model"],
+                "actual_model": result["actual_model"],
                 "error": result["error"],
             })
             ai_urls.extend(result["urls"])
         else:
             ai_meta.update({
                 "status": "ok" if config.get_setting("openrouter_api_key", "").strip() else "disabled",
+                "requested_model": config.get_setting("openrouter_model", ""),
+                "actual_model": None,
                 "error": None,
             })
             logger.info(f"Bing+DDG found {len(seen_domains)} URLs — no AI needed")
@@ -586,5 +604,3 @@ def generate_urls_report(niche: str, city: str, country: str, country_tld: str =
         "sources": source_counts,
         "ai": ai_meta,
     }
-
-

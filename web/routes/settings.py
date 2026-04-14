@@ -30,7 +30,7 @@ def index():
             "verify_timeout": int(request.form.get("verify_timeout", 10)),
             "robots_txt_mode": request.form.get("robots_txt_mode", "soft").strip(),
             "openrouter_api_key": request.form.get("openrouter_api_key", "").strip(),
-            "openrouter_model": request.form.get("openrouter_model", "google/gemma-3-1b-it:free").strip(),
+            "openrouter_model": request.form.get("openrouter_model", "openrouter/free").strip(),
         }
         config.save_settings(updates)
 

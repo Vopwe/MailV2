@@ -109,6 +109,26 @@ def build_queries(niche: str, city: str, country: str, country_tld: str = ".com"
             "query": f'"{niche}" "{city}" website',
             "results_needed": per_query,
         },
+        {
+            "query": f'"{niche}" "{city}" "contact us"',
+            "results_needed": per_query,
+        },
+        {
+            "query": f'"{niche}" "{city}" "about us"',
+            "results_needed": per_query,
+        },
+        {
+            "query": f'{niche} "{city}" official site',
+            "results_needed": per_query,
+        },
+        {
+            "query": f'{niche} "{city}" company',
+            "results_needed": per_query,
+        },
+        {
+            "query": f'{niche} "{city}" business website',
+            "results_needed": per_query,
+        },
     ])
 
     return queries

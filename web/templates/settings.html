@@ -148,12 +148,13 @@
             <div class="form-group">
                 <label for="openrouter_model">AI Model</label>
                 <select id="openrouter_model" name="openrouter_model">
-                    <option value="google/gemma-3-1b-it:free" {% if settings.get('openrouter_model', 'google/gemma-3-1b-it:free') == 'google/gemma-3-1b-it:free' %}selected{% endif %}>Gemma 3 1B (Free)</option>
-                    <option value="meta-llama/llama-3.1-8b-instruct:free" {% if settings.get('openrouter_model') == 'meta-llama/llama-3.1-8b-instruct:free' %}selected{% endif %}>Llama 3.1 8B (Free)</option>
-                    <option value="mistralai/mistral-small-3.1-24b-instruct:free" {% if settings.get('openrouter_model') == 'mistralai/mistral-small-3.1-24b-instruct:free' %}selected{% endif %}>Mistral Small 3.1 24B (Free)</option>
-                    <option value="google/gemma-3-4b-it:free" {% if settings.get('openrouter_model') == 'google/gemma-3-4b-it:free' %}selected{% endif %}>Gemma 3 4B (Free)</option>
+                    <option value="openrouter/free" {% if settings.get('openrouter_model', 'openrouter/free') == 'openrouter/free' %}selected{% endif %}>OpenRouter Free Router (Recommended)</option>
+                    <option value="google/gemma-4-31b-it:free" {% if settings.get('openrouter_model') == 'google/gemma-4-31b-it:free' %}selected{% endif %}>Gemma 4 31B (Free)</option>
+                    <option value="openai/gpt-oss-120b:free" {% if settings.get('openrouter_model') == 'openai/gpt-oss-120b:free' %}selected{% endif %}>GPT-OSS 120B (Free)</option>
+                    <option value="nvidia/nemotron-3-super-120b-a12b:free" {% if settings.get('openrouter_model') == 'nvidia/nemotron-3-super-120b-a12b:free' %}selected{% endif %}>Nemotron 3 Super 120B (Free)</option>
+                    <option value="openai/gpt-oss-20b:free" {% if settings.get('openrouter_model') == 'openai/gpt-oss-20b:free' %}selected{% endif %}>GPT-OSS 20B (Free)</option>
                 </select>
-                <span class="hint">All listed models are free. Larger models may give better URL diversity.</span>
+                <span class="hint">Router best for uptime. Specific models best when you want stable exact behavior.</span>
             </div>
             <div class="form-group">
                 <label>Status</label>

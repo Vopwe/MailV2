@@ -341,7 +341,8 @@ class RegressionTests(unittest.TestCase):
             result = asyncio.run(generate_ai_urls_with_meta("agency", "Seattle", "USA", count=2))
 
         self.assertEqual(result["status"], "ok")
-        self.assertEqual(result["model"], "good-model")
+        self.assertEqual(result["requested_model"], "openrouter/free")
+        self.assertEqual(result["actual_model"], "good-model")
         self.assertEqual(result["urls"], ["https://alpha.example", "https://beta.example"])
 
     def test_campaign_stats_include_url_generation_summary(self):
@@ -353,7 +354,8 @@ class RegressionTests(unittest.TestCase):
             "sources": {"bing": 0, "ddg": 1, "ai": 1},
             "ai": {
                 "status": "error",
-                "model": "bad-model",
+                "requested_model": "bad-model",
+                "actual_model": None,
                 "error": "HTTP 404",
             },
         }
@@ -376,6 +378,7 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(stats["url_generation"]["sources"]["ddg"], 1)
         self.assertEqual(stats["url_generation"]["ai"]["status"], "partial")
         self.assertEqual(stats["url_generation"]["ai"]["error"], "HTTP 404")
+        self.assertEqual(stats["url_generation"]["ai"]["requested_models"], ["bad-model"])
 
     def test_logging_setup_adds_server_log_handlers(self):
         logging_setup.setup_logging()

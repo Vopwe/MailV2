@@ -105,8 +105,11 @@
         <span class="badge badge-{{ 'valid' if ai_meta.get('status') == 'ok' else 'risky' if ai_meta.get('status') == 'partial' else 'invalid' if ai_meta.get('status') == 'error' else 'unknown' }}">
             {{ ai_meta.get('status', 'unknown') }}
         </span>
-        {% if ai_meta.get('models') %}
-        <span class="email-meta">Model{% if ai_meta.get('models')|length > 1 %}s{% endif %}: {{ ai_meta.get('models') | join(', ') }}</span>
+        {% if ai_meta.get('requested_models') %}
+        <span class="email-meta">Requested: {{ ai_meta.get('requested_models') | join(', ') }}</span>
+        {% endif %}
+        {% if ai_meta.get('actual_models') %}
+        <span class="email-meta">| Used: {{ ai_meta.get('actual_models') | join(', ') }}</span>
         {% endif %}
         {% if ai_meta.get('error') %}
         <span class="email-meta">| {{ ai_meta.get('error') }}</span>
@@ -228,8 +231,11 @@
             <span class="badge badge-{{ 'valid' if ai_meta.get('status') == 'ok' else 'risky' if ai_meta.get('status') == 'partial' else 'invalid' if ai_meta.get('status') == 'error' else 'unknown' }}">
                 {{ ai_meta.get('status', 'unknown') }}
             </span>
-            {% if ai_meta.get('models') %}
-            <span class="email-meta">Model{% if ai_meta.get('models')|length > 1 %}s{% endif %}: {{ ai_meta.get('models') | join(', ') }}</span>
+            {% if ai_meta.get('requested_models') %}
+            <span class="email-meta">Requested: {{ ai_meta.get('requested_models') | join(', ') }}</span>
+            {% endif %}
+            {% if ai_meta.get('actual_models') %}
+            <span class="email-meta">| Used: {{ ai_meta.get('actual_models') | join(', ') }}</span>
             {% endif %}
             {% if ai_meta.get('error') %}
             <div class="email-meta" style="margin-top: 6px;">{{ ai_meta.get('error') }}</div>

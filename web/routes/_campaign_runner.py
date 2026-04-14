@@ -46,7 +46,8 @@ def _generate_for_combo(combo, urls_per_batch):
                 "sources": {"bing": 0, "ddg": 0, "ai": 0},
                 "ai": {
                     "status": "error",
-                    "model": config.get_setting("openrouter_model", ""),
+                    "requested_model": config.get_setting("openrouter_model", ""),
+                    "actual_model": None,
                     "error": str(e),
                 },
             },
@@ -229,17 +230,21 @@ def _build_url_generation_summary(reports: list[dict], rows: list[dict]) -> dict
             source_counts[source] += 1
 
     ai_statuses = []
-    ai_models = []
+    requested_models = []
+    actual_models = []
     ai_errors = []
     for report in reports:
         ai_report = report.get("ai", {})
         status = ai_report.get("status")
-        model = ai_report.get("model")
+        requested_model = ai_report.get("requested_model")
+        actual_model = ai_report.get("actual_model")
         error = ai_report.get("error")
         if status:
             ai_statuses.append(status)
-        if model and model not in ai_models:
-            ai_models.append(model)
+        if requested_model and requested_model not in requested_models:
+            requested_models.append(requested_model)
+        if actual_model and actual_model not in actual_models:
+            actual_models.append(actual_model)
         if error and error not in ai_errors:
             ai_errors.append(error)
 
@@ -254,7 +259,8 @@ def _build_url_generation_summary(reports: list[dict], rows: list[dict]) -> dict
         "total_urls_after_dedup": len(rows),
         "ai": {
             "status": overall_ai_status,
-            "models": ai_models,
+            "requested_models": requested_models,
+            "actual_models": actual_models,
             "error": ai_errors[0] if ai_errors else None,
         },
     }
