@@ -1,6 +1,10 @@
 """
-Bing search query builder — generates multiple query variations
-per niche/city/country for maximum URL diversity.
+Bing search query builder — generates diverse query variations
+per niche/city/country for maximum URL yield.
+
+Strategy: cast a WIDE net with many different query phrasings.
+Bing returns ~10 organic results per page, so we need varied queries
+to accumulate enough unique domains.
 """
 
 
@@ -9,39 +13,102 @@ def build_queries(niche: str, city: str, country: str, country_tld: str = ".com"
     Build diverse Bing search queries for a niche/city/country combo.
     Returns list of dicts: {"query": str, "results_needed": int}
 
-    We over-generate queries so the scraper can stop early once `count` unique URLs are found.
+    We generate 12-15+ query variations to maximize unique domain yield.
+    Each Bing page gives ~8-10 organic results, and after domain dedup
+    we keep ~60-70%, so we need many queries to hit the target count.
     """
     tld_clean = country_tld.lstrip(".")
+    per_query = max(count, 20)  # target per query (will dedup later)
 
     queries = [
-        # High-intent: contact/email pages
+        # ── Direct business search ────────────────────────────────
         {
-            "query": f'"{niche}" "{city}" contact email',
-            "results_needed": count,
+            "query": f'{niche} in {city} {country}',
+            "results_needed": per_query,
         },
-        # Company listings
         {
-            "query": f'"{niche}" companies "{city}" {country}',
-            "results_needed": count,
+            "query": f'{niche} {city} {country}',
+            "results_needed": per_query,
         },
-        # Directory-style
+        # ── Contact / email intent ────────────────────────────────
         {
-            "query": f'"{niche}" directory "{city}"',
-            "results_needed": count,
+            "query": f'{niche} {city} contact email',
+            "results_needed": per_query,
+        },
+        {
+            "query": f'{niche} {city} contact us',
+            "results_needed": per_query,
+        },
+        # ── Company list intent ───────────────────────────────────
+        {
+            "query": f'best {niche} in {city}',
+            "results_needed": per_query,
+        },
+        {
+            "query": f'top {niche} companies {city}',
+            "results_needed": per_query,
+        },
+        {
+            "query": f'{niche} companies in {city} {country}',
+            "results_needed": per_query,
+        },
+        # ── Directory / listing intent ────────────────────────────
+        {
+            "query": f'{niche} directory {city} {country}',
+            "results_needed": per_query,
+        },
+        {
+            "query": f'{niche} near me {city}',
+            "results_needed": per_query,
+        },
+        # ── Service intent ────────────────────────────────────────
+        {
+            "query": f'{niche} services {city}',
+            "results_needed": per_query,
+        },
+        {
+            "query": f'hire {niche} {city} {country}',
+            "results_needed": per_query,
+        },
+        # ── Review / recommendation intent (different result set) ─
+        {
+            "query": f'{niche} {city} reviews',
+            "results_needed": per_query,
+        },
+        # ── Professional / business intent ────────────────────────
+        {
+            "query": f'{niche} agency {city}',
+            "results_needed": per_query,
+        },
+        {
+            "query": f'{niche} firm {city} {country}',
+            "results_needed": per_query,
         },
     ]
 
-    # Add TLD-scoped query only if not generic .com
+    # TLD-scoped queries (non-.com countries)
     if tld_clean != "com":
-        queries.append({
-            "query": f'"{niche}" "{city}" site:.{tld_clean}',
-            "results_needed": count,
-        })
+        queries.extend([
+            {
+                "query": f'{niche} {city} site:.{tld_clean}',
+                "results_needed": per_query,
+            },
+            {
+                "query": f'{niche} services site:.{tld_clean} {city}',
+                "results_needed": per_query,
+            },
+        ])
 
-    # Services-style query
-    queries.append({
-        "query": f'{niche} services in {city} {country} email',
-        "results_needed": count,
-    })
+    # Quoted variations (force exact match — different result set)
+    queries.extend([
+        {
+            "query": f'"{niche}" "{city}" email',
+            "results_needed": per_query,
+        },
+        {
+            "query": f'"{niche}" "{city}" website',
+            "results_needed": per_query,
+        },
+    ])
 
     return queries

@@ -48,6 +48,78 @@ CAPTCHA_PATTERNS = [
 
 BING_SEARCH_URL = "https://www.bing.com/search"
 
+# Map country names to Bing market codes.
+# This overrides Bing's IP-based geo-detection so European VPS IPs
+# get results for the target country, not the server's country.
+COUNTRY_TO_BING_MARKET = {
+    "United States": ("en-US", "US"),
+    "United Kingdom": ("en-GB", "GB"),
+    "Canada": ("en-CA", "CA"),
+    "Australia": ("en-AU", "AU"),
+    "Germany": ("de-DE", "DE"),
+    "France": ("fr-FR", "FR"),
+    "Spain": ("es-ES", "ES"),
+    "Italy": ("it-IT", "IT"),
+    "Netherlands": ("nl-NL", "NL"),
+    "Belgium": ("nl-BE", "BE"),
+    "Switzerland": ("de-CH", "CH"),
+    "Austria": ("de-AT", "AT"),
+    "Sweden": ("sv-SE", "SE"),
+    "Norway": ("nb-NO", "NO"),
+    "Denmark": ("da-DK", "DK"),
+    "Finland": ("fi-FI", "FI"),
+    "Poland": ("pl-PL", "PL"),
+    "Portugal": ("pt-PT", "PT"),
+    "Brazil": ("pt-BR", "BR"),
+    "Mexico": ("es-MX", "MX"),
+    "Argentina": ("es-AR", "AR"),
+    "Colombia": ("es-CO", "CO"),
+    "Chile": ("es-CL", "CL"),
+    "India": ("en-IN", "IN"),
+    "Japan": ("ja-JP", "JP"),
+    "South Korea": ("ko-KR", "KR"),
+    "Singapore": ("en-SG", "SG"),
+    "Malaysia": ("en-MY", "MY"),
+    "Philippines": ("en-PH", "PH"),
+    "New Zealand": ("en-NZ", "NZ"),
+    "South Africa": ("en-ZA", "ZA"),
+    "Ireland": ("en-IE", "IE"),
+    "United Arab Emirates": ("en-AE", "AE"),
+    "Saudi Arabia": ("ar-SA", "SA"),
+    "Turkey": ("tr-TR", "TR"),
+    "Indonesia": ("id-ID", "ID"),
+    "Thailand": ("th-TH", "TH"),
+    "Vietnam": ("vi-VN", "VN"),
+    "Czech Republic": ("cs-CZ", "CZ"),
+    "Romania": ("ro-RO", "RO"),
+    "Hungary": ("hu-HU", "HU"),
+    "Greece": ("el-GR", "GR"),
+    "Israel": ("he-IL", "IL"),
+    "Egypt": ("ar-EG", "EG"),
+    "Nigeria": ("en-NG", "NG"),
+    "Kenya": ("en-KE", "KE"),
+    "Ghana": ("en-GH", "GH"),
+    "Pakistan": ("en-PK", "PK"),
+    "Bangladesh": ("en-BD", "BD"),
+    "China": ("zh-CN", "CN"),
+    "Taiwan": ("zh-TW", "TW"),
+    "Hong Kong": ("zh-HK", "HK"),
+    "Russia": ("ru-RU", "RU"),
+    "Ukraine": ("uk-UA", "UA"),
+}
+
+
+def _get_bing_market(country: str) -> tuple[str, str]:
+    """Resolve country name to (mkt, cc) for Bing. Falls back to en-US."""
+    if country in COUNTRY_TO_BING_MARKET:
+        return COUNTRY_TO_BING_MARKET[country]
+    # Fuzzy match: check if country name is contained in a key
+    country_lower = country.lower()
+    for name, codes in COUNTRY_TO_BING_MARKET.items():
+        if country_lower in name.lower() or name.lower() in country_lower:
+            return codes
+    return ("en-US", "US")
+
 
 def _is_captcha_response(html: str) -> bool:
     """Check if Bing returned a captcha/block page.
@@ -172,7 +244,7 @@ def _filter_urls(raw_urls: list[str]) -> list[str]:
     return valid
 
 
-async def _scrape_bing_page(query: str, first: int = 0) -> tuple[list[str], bool]:
+async def _scrape_bing_page(query: str, first: int = 0, mkt: str = "en-US", cc: str = "US") -> tuple[list[str], bool]:
     """
     Scrape a single Bing search results page.
     Returns (urls, was_blocked).
@@ -180,12 +252,15 @@ async def _scrape_bing_page(query: str, first: int = 0) -> tuple[list[str], bool
     ip = get_next_ip()
     delay_min = float(config.get_setting("bing_delay_min", config.BING_DELAY_MIN))
     delay_max = float(config.get_setting("bing_delay_max", config.BING_DELAY_MAX))
-    results_per_page = int(config.get_setting("bing_results_per_page", config.BING_RESULTS_PER_PAGE))
 
+    # Bing returns ~10 organic results per page.
+    # mkt + cc override IP-based geo-detection (critical for European VPS IPs).
     params = {
         "q": query,
-        "count": str(results_per_page),
-        "setlang": "en",
+        "count": "10",
+        "setlang": mkt.split("-")[0],  # language part of market code
+        "mkt": mkt,
+        "cc": cc,
     }
     if first > 0:
         params["first"] = str(first)
@@ -248,20 +323,21 @@ async def _scrape_bing_page(query: str, first: int = 0) -> tuple[list[str], bool
         await asyncio.sleep(delay)
 
 
-async def _scrape_query(query_str: str, target_count: int) -> list[str]:
-    """Scrape multiple Bing pages for a single query until target_count URLs or 3 pages."""
+async def _scrape_query(query_str: str, target_count: int, mkt: str = "en-US", cc: str = "US") -> list[str]:
+    """Scrape multiple Bing pages for a single query until target_count URLs or exhausted."""
     all_urls = []
-    max_pages = 3  # Bing pages 1-3
+    max_pages = 5  # Scrape up to 5 pages (~50 results max)
 
     for page_num in range(max_pages):
-        first = page_num * 10  # Bing uses 'first' offset
-        page_urls, was_blocked = await _scrape_bing_page(query_str, first=first)
+        first = page_num * 10  # Bing uses 'first' offset (10 per page)
+        page_urls, was_blocked = await _scrape_bing_page(query_str, first=first, mkt=mkt, cc=cc)
 
         if was_blocked:
             logger.info(f"Blocked on page {page_num + 1} for: {query_str[:50]}")
             break
 
         all_urls.extend(page_urls)
+        logger.debug(f"Page {page_num + 1}: got {len(page_urls)} URLs (total: {len(all_urls)})")
 
         # Stop if no results on this page (exhausted)
         if not page_urls:
@@ -280,20 +356,28 @@ def generate_urls(niche: str, city: str, country: str, country_tld: str = ".com"
     DROP-IN REPLACEMENT for ai/client.py::generate_urls().
     Same signature, same return type.
     """
+    # Resolve country to Bing market code to override IP-based geo-detection
+    mkt, cc = _get_bing_market(country)
+    logger.info(f"Bing market: {mkt} (cc={cc}) for country: {country}")
+
     queries = build_queries(niche, city, country, country_tld, count)
     all_raw_urls = []
 
     # Run async scraping in a new event loop (called from sync context)
     async def _run():
-        for q_info in queries:
+        for i, q_info in enumerate(queries):
             query_str = q_info["query"]
             target = q_info["results_needed"]
-            logger.info(f"Bing scraping: {query_str}")
-            urls = await _scrape_query(query_str, target)
+            logger.info(f"Bing query [{i+1}/{len(queries)}]: {query_str}")
+            urls = await _scrape_query(query_str, target, mkt=mkt, cc=cc)
             all_raw_urls.extend(urls)
 
-            # Early exit if we have plenty
-            if len(_filter_urls(all_raw_urls)) >= count:
+            unique_count = len(_filter_urls(all_raw_urls))
+            logger.info(f"  -> {len(urls)} raw URLs, {unique_count} unique domains so far")
+
+            # Early exit if we have 1.5x the target (buffer for safety)
+            if unique_count >= int(count * 1.5):
+                logger.info(f"  -> Reached {unique_count} unique domains, stopping early")
                 break
 
     # Handle case where we're already in an event loop
