@@ -23,6 +23,11 @@ BING_DELAY_MAX = 5.0
 BING_RESULTS_PER_PAGE = 50
 OUTBOUND_IPS = []  # Configured via settings.json or ips.txt
 
+# ─── DDG Scraper Defaults ────────────────────────────────────────────
+DDG_CONCURRENCY = 5
+DDG_DELAY_MIN = 1.0
+DDG_DELAY_MAX = 3.0
+
 # ─── Crawl Defaults ──────────────────────────────────────────────────
 MAX_CONCURRENT_REQUESTS = 30
 REQUEST_TIMEOUT = 12
@@ -169,6 +174,9 @@ def get_all_settings() -> dict:
         "bing_delay_min": BING_DELAY_MIN,
         "bing_delay_max": BING_DELAY_MAX,
         "bing_results_per_page": BING_RESULTS_PER_PAGE,
+        "ddg_concurrency": DDG_CONCURRENCY,
+        "ddg_delay_min": DDG_DELAY_MIN,
+        "ddg_delay_max": DDG_DELAY_MAX,
         "outbound_ips": OUTBOUND_IPS,
         "verify_concurrency": VERIFY_CONCURRENCY,
         "max_concurrent_requests": MAX_CONCURRENT_REQUESTS,

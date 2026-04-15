@@ -115,7 +115,10 @@ async def _scrape_ddg_page(query: str) -> list[str]:
         logger.error(f"DDG scrape error: {e}")
         return []
     finally:
-        await asyncio.sleep(random.uniform(1.0, 3.0))
+        import config
+        delay_min = float(config.get_setting("ddg_delay_min", 1.0))
+        delay_max = float(config.get_setting("ddg_delay_max", 3.0))
+        await asyncio.sleep(random.uniform(delay_min, delay_max))
 
 
 async def scrape_ddg(niche: str, city: str, country: str, count: int = 40) -> list[str]:

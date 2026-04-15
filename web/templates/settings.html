@@ -31,16 +31,17 @@
 
 <form method="post" class="form-card">
     <div class="settings-tabs">
-        <button type="button" class="settings-tab active" data-tab="bing">Bing Scraper</button>
+        <button type="button" class="settings-tab active" data-tab="search">Search Engines</button>
         <button type="button" class="settings-tab" data-tab="ips">IP Rotation</button>
         <button type="button" class="settings-tab" data-tab="ai">AI (OpenRouter)</button>
         <button type="button" class="settings-tab" data-tab="crawl">Crawl</button>
         <button type="button" class="settings-tab" data-tab="verify">Verification</button>
         <button type="button" class="settings-tab" data-tab="security">Security</button>
+        <button type="button" class="settings-tab" data-tab="logs">Server Logs</button>
     </div>
 
-    <div class="settings-panel active" id="tab-bing">
-        <h2>Bing Scraper</h2>
+    <div class="settings-panel active" id="tab-search">
+        <h2>Search Engines (Bing & DDG)</h2>
         <div class="form-row">
             <div class="form-group">
                 <label for="bing_concurrency">Parallel Bing Scrapes</label>
@@ -71,12 +72,31 @@
         </div>
         <div class="form-row">
             <div class="form-group">
-                <label for="bing_results_per_page">Bing Results per Page</label>
+                <label>Bing Results per Page</label>
                 <input type="number" id="bing_results_per_page" name="bing_results_per_page"
                        value="{{ settings.bing_results_per_page }}" min="10" max="50" step="10">
-                <span class="hint">Bing's count parameter. 50 max — fewer pages needed.</span>
+                <span class="hint">Bing's count parameter. 50 max.</span>
             </div>
-            <div class="form-group"></div>
+            <div class="form-group">
+                <label>DDG Parallel Scrapes</label>
+                <input type="number" id="ddg_concurrency" name="ddg_concurrency"
+                       value="{{ settings.get('ddg_concurrency', 5) }}" min="1" max="20">
+                <span class="hint">How many DDG queries run simultaneously.</span>
+            </div>
+        </div>
+        <div class="form-row">
+            <div class="form-group">
+                <label>DDG Min Delay (sec)</label>
+                <input type="number" id="ddg_delay_min" name="ddg_delay_min"
+                       value="{{ settings.get('ddg_delay_min', 1.0) }}" min="0.5" max="30" step="0.5">
+                <span class="hint">Minimum random delay for DuckDuckGo.</span>
+            </div>
+            <div class="form-group">
+                <label>DDG Max Delay (sec)</label>
+                <input type="number" id="ddg_delay_max" name="ddg_delay_max"
+                       value="{{ settings.get('ddg_delay_max', 3.0) }}" min="1" max="60" step="0.5">
+                <span class="hint">Maximum random delay for DuckDuckGo.</span>
+            </div>
         </div>
     </div>
 
@@ -274,16 +294,49 @@
     </div>
 </form>
 
+<div class="settings-panel" id="tab-logs">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+        <h2>Server Logs</h2>
+        <div class="header-actions" style="display: flex; gap: 10px; align-items: center;">
+            <button type="button" class="btn btn-secondary btn-sm" onclick="refreshLogs()">Refresh</button>
+            <label style="display: inline-flex; align-items: center; gap: 6px; font-size: 0.85rem; margin: 0;">
+                <input type="checkbox" id="auto-refresh" style="width: auto; margin:0;" checked> Auto-refresh
+            </label>
+            <select id="log-lines" style="width: auto; padding: 4px 8px; font-size: 0.85rem;">
+                <option value="50">50 lines</option>
+                <option value="100" selected>100 lines</option>
+                <option value="200">200 lines</option>
+                <option value="500">500 lines</option>
+            </select>
+        </div>
+    </div>
+    <div id="log-meta" class="hint" style="margin-bottom: 8px;"></div>
+    <div id="log-container" style="background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; padding: 16px; min-height: 400px; max-height: 50vh; overflow-y: auto; font-family: 'Courier New', monospace; font-size: 0.8rem; line-height: 1.6; white-space: pre-wrap; word-break: break-all; color: var(--text-secondary);">
+        Loading...
+    </div>
+</div>
+
 {% endblock %}
 
 {% block scripts %}
 <script>
+let autoRefreshTimer = null;
+
 document.querySelectorAll('.settings-tab').forEach(tab => {
     tab.addEventListener('click', () => {
         document.querySelectorAll('.settings-tab').forEach(t => t.classList.remove('active'));
         document.querySelectorAll('.settings-panel').forEach(p => p.classList.remove('active'));
         tab.classList.add('active');
         document.getElementById('tab-' + tab.dataset.tab).classList.add('active');
+        if(tab.dataset.tab === 'logs') {
+            refreshLogs();
+            toggleAutoRefresh();
+        } else {
+            if (autoRefreshTimer) {
+                clearInterval(autoRefreshTimer);
+                autoRefreshTimer = null;
+            }
+        }
     });
 });
 
@@ -303,5 +356,64 @@ async function refreshIpStatus() {
         msg.style.color = 'var(--danger)';
     }
 }
+
+// LOGS logic
+async function refreshLogs() {
+    const lines = document.getElementById('log-lines').value;
+    const container = document.getElementById('log-container');
+    const meta = document.getElementById('log-meta');
+    if(!container) return;
+
+    try {
+        const res = await fetch(`/api/logs?lines=${lines}`);
+        const data = await res.json();
+        if (data.error) {
+            container.textContent = `Error: ${data.error}`;
+            meta.textContent = '';
+            return;
+        }
+        meta.textContent = `Source: ${data.file} | Showing ${data.showing} of ${data.total_lines} lines`;
+        const wasScrolledToBottom = container.scrollHeight - container.clientHeight <= container.scrollTop + 50;
+
+        container.innerHTML = data.lines.map(line => {
+            let cls = '';
+            if (line.includes('ERROR') || line.includes('error')) cls = 'log-error';
+            else if (line.includes('WARNING') || line.includes('warning')) cls = 'log-warn';
+            else if (line.includes('INFO') || line.includes('Bing via IP') || line.includes('OpenRouter')) cls = 'log-info';
+            return `<span class="${cls}">${escapeHtml(line)}</span>`;
+        }).join('\n');
+
+        if (wasScrolledToBottom) {
+            container.scrollTop = container.scrollHeight;
+        }
+    } catch (e) {
+        container.textContent = `Failed to fetch logs: ${e.message}`;
+    }
+}
+
+function escapeHtml(text) {
+    const d = document.createElement('div');
+    d.textContent = text;
+    return d.innerHTML;
+}
+
+function toggleAutoRefresh() {
+    if (autoRefreshTimer) {
+        clearInterval(autoRefreshTimer);
+        autoRefreshTimer = null;
+    }
+    const autoRefreshCb = document.getElementById('auto-refresh');
+    if (autoRefreshCb && autoRefreshCb.checked && document.getElementById('tab-logs').classList.contains('active')) {
+        autoRefreshTimer = setInterval(refreshLogs, 5000);
+    }
+}
+
+document.getElementById('auto-refresh')?.addEventListener('change', toggleAutoRefresh);
+document.getElementById('log-lines')?.addEventListener('change', refreshLogs);
 </script>
+<style>
+.log-error { color: var(--danger, #ef4444); }
+.log-warn { color: var(--warning, #f59e0b); }
+.log-info { color: var(--primary, #6366f1); }
+</style>
 {% endblock %}

@@ -72,27 +72,7 @@
     </div>
 </div>
 
-{% if ip_status.total_ips > 0 %}
-<div class="section" style="margin-top: 12px;">
-    <p class="hint">
-        <strong>IP Rotation:</strong>
-        {{ ip_status.total_ips }} IPs configured |
-        <span style="color: var(--success);">{{ ip_status.available_ips }} available</span>
-        {% if ip_status.cooled_down_ips > 0 %}
-        | <span style="color: var(--warning);">{{ ip_status.cooled_down_ips }} on cooldown</span>
-        {% endif %}
-        {% if ip_status.configured_ips %}
-        | <small>{{ ip_status.configured_ips | join(', ') }}</small>
-        {% endif %}
-    </p>
-</div>
-{% elif ip_status.total_ips == 0 %}
-<div class="section" style="margin-top: 12px;">
-    <p class="hint" style="color: var(--warning);">
-        <strong>IP Rotation:</strong> No IPs configured — using server default. Add IPs in Settings → IP Rotation.
-    </p>
-</div>
-{% endif %}
+
 
 {% if crawl_stats %}
 <!-- ─── Crawl Health ─────────────────────────────────── -->
