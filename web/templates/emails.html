@@ -64,9 +64,17 @@
 </div>
 
 <div class="section data-operations-deck" style="margin-top: 16px;">
-    <div style="display: flex; flex-wrap: wrap; gap: 24px;">
+    <div style="display: flex; gap: 12px; margin-bottom: 12px;">
+        <button type="button" class="btn btn-secondary btn-sm" id="toggle-export-btn" onclick="togglePanel('export-panel', this)">
+            Export Options ▾
+        </button>
+        <button type="button" class="btn btn-secondary btn-sm" id="toggle-cleanup-btn" onclick="togglePanel('cleanup-panel', this)">
+            Database Cleanup ▾
+        </button>
+    </div>
+    <div id="panels-container" style="display: flex; flex-wrap: wrap; gap: 24px;">
         <!-- EXPORT SETTINGS -->
-        <div class="verify-health-card" style="flex: 1 1 48%;">
+        <div id="export-panel" class="verify-health-card" style="flex: 1 1 48%; display: none;">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; border-bottom: 1px solid var(--border); padding-bottom: 8px;">
                 <h3 style="margin: 0;">Export Options</h3>
                 <span class="hint" style="margin: 0; font-size: 0.8rem;">Define columns & exclusions</span>
@@ -112,7 +120,7 @@
         </div>
 
         <!-- DATABASE CLEANUP -->
-        <div class="verify-health-card" style="flex: 1 1 48%;">
+        <div id="cleanup-panel" class="verify-health-card" style="flex: 1 1 48%; display: none;">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; border-bottom: 1px solid var(--border); padding-bottom: 8px;">
                 <h3 style="margin: 0; color: var(--danger);">Database Cleanup</h3>
                 <span class="hint" style="margin: 0; font-size: 0.8rem;">Filter-bound deletion</span>
@@ -171,6 +179,7 @@
                 {% endif %}
             </div>
         </div>
+    </div>
     </div>
 </div>
 
@@ -252,6 +261,14 @@
 
 {% block scripts %}
 <script>
+function togglePanel(panelId, btn) {
+    const panel = document.getElementById(panelId);
+    if (!panel) return;
+    const isOpen = panel.style.display !== 'none';
+    panel.style.display = isOpen ? 'none' : '';
+    btn.textContent = btn.textContent.replace(isOpen ? '▴' : '▾', isOpen ? '▾' : '▴');
+}
+
 function toggleAll(source) {
     const checkboxes = document.querySelectorAll('input[name="email_ids"]');
     checkboxes.forEach(cb => cb.checked = source.checked);

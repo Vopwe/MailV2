@@ -6,30 +6,7 @@
     <h1>Settings</h1>
 </div>
 
-<div class="section" style="margin-bottom: 16px;">
-    <h2>Runtime Files</h2>
-    <p class="hint" style="margin-bottom: 10px;">These are the exact files this app instance reads and writes. If saved API keys or emails look missing, check these paths first.</p>
-    <div class="verify-health-grid">
-        <div class="verify-health-card">
-            <span class="export-group-label">Settings JSON</span>
-            <div class="email-meta">{{ runtime_paths.settings }}</div>
-        </div>
-        <div class="verify-health-card">
-            <span class="export-group-label">Database</span>
-            <div class="email-meta">{{ runtime_paths.database }}</div>
-        </div>
-        <div class="verify-health-card">
-            <span class="export-group-label">Server Log</span>
-            <div class="email-meta">{{ runtime_paths.server_out_log }}</div>
-        </div>
-        <div class="verify-health-card">
-            <span class="export-group-label">Error Log</span>
-            <div class="email-meta">{{ runtime_paths.server_err_log }}</div>
-        </div>
-    </div>
-</div>
-
-<form method="post" class="form-card">
+<form method="post" class="form-card" style="max-width: 100%; padding: 32px;">
     <div class="settings-tabs">
         <button type="button" class="settings-tab active" data-tab="search">Search Engines</button>
         <button type="button" class="settings-tab" data-tab="ips">IP Rotation</button>
@@ -41,61 +18,57 @@
     </div>
 
     <div class="settings-panel active" id="tab-search">
-        <h2>Search Engines (Bing & DDG)</h2>
+        <h2>Search Engines</h2>
         <div class="form-row">
             <div class="form-group">
-                <label for="bing_concurrency">Parallel Bing Scrapes</label>
-                <input type="number" id="bing_concurrency" name="bing_concurrency"
-                       value="{{ settings.bing_concurrency }}" min="1" max="20">
-                <span class="hint">How many Bing queries run simultaneously. Keep low to avoid bans.</span>
-            </div>
-            <div class="form-group">
-                <label for="urls_per_batch">URLs per Niche/City Combo</label>
+                <label for="urls_per_batch">URLs per Niche/City</label>
                 <input type="number" id="urls_per_batch" name="urls_per_batch"
                        value="{{ settings.urls_per_batch }}" min="5" max="100">
-                <span class="hint">Max unique URLs to scrape from Bing per niche/city combination.</span>
-            </div>
-        </div>
-        <div class="form-row">
-            <div class="form-group">
-                <label for="bing_delay_min">Min Delay Between Requests (sec)</label>
-                <input type="number" id="bing_delay_min" name="bing_delay_min"
-                       value="{{ settings.bing_delay_min }}" min="0.5" max="30" step="0.5">
-                <span class="hint">Minimum random delay between Bing page fetches.</span>
+                <span class="hint">Max URLs scraped per niche/city combo across all engines.</span>
             </div>
             <div class="form-group">
-                <label for="bing_delay_max">Max Delay Between Requests (sec)</label>
-                <input type="number" id="bing_delay_max" name="bing_delay_max"
-                       value="{{ settings.bing_delay_max }}" min="1" max="60" step="0.5">
-                <span class="hint">Maximum random delay. Higher = safer, slower.</span>
-            </div>
-        </div>
-        <div class="form-row">
-            <div class="form-group">
-                <label>Bing Results per Page</label>
+                <label for="bing_results_per_page">Results per Page</label>
                 <input type="number" id="bing_results_per_page" name="bing_results_per_page"
                        value="{{ settings.bing_results_per_page }}" min="10" max="50" step="10">
-                <span class="hint">Bing's count parameter. 50 max.</span>
-            </div>
-            <div class="form-group">
-                <label>DDG Parallel Scrapes</label>
-                <input type="number" id="ddg_concurrency" name="ddg_concurrency"
-                       value="{{ settings.get('ddg_concurrency', 5) }}" min="1" max="20">
-                <span class="hint">How many DDG queries run simultaneously.</span>
+                <span class="hint">How many results fetched per search page (max 50).</span>
             </div>
         </div>
         <div class="form-row">
             <div class="form-group">
-                <label>DDG Min Delay (sec)</label>
-                <input type="number" id="ddg_delay_min" name="ddg_delay_min"
-                       value="{{ settings.get('ddg_delay_min', 1.0) }}" min="0.5" max="30" step="0.5">
-                <span class="hint">Minimum random delay for DuckDuckGo.</span>
+                <label for="bing_concurrency">Bing — Parallel Scrapes</label>
+                <input type="number" id="bing_concurrency" name="bing_concurrency"
+                       value="{{ settings.bing_concurrency }}" min="1" max="20">
+                <span class="hint">Keep low (2–5) to avoid bans.</span>
             </div>
             <div class="form-group">
-                <label>DDG Max Delay (sec)</label>
-                <input type="number" id="ddg_delay_max" name="ddg_delay_max"
-                       value="{{ settings.get('ddg_delay_max', 3.0) }}" min="1" max="60" step="0.5">
-                <span class="hint">Maximum random delay for DuckDuckGo.</span>
+                <label>Bing — Delay Range (sec)</label>
+                <div style="display: flex; gap: 8px; align-items: center;">
+                    <input type="number" id="bing_delay_min" name="bing_delay_min"
+                           value="{{ settings.bing_delay_min }}" min="0.5" max="30" step="0.5" placeholder="Min">
+                    <span class="hint" style="margin:0;">–</span>
+                    <input type="number" id="bing_delay_max" name="bing_delay_max"
+                           value="{{ settings.bing_delay_max }}" min="1" max="60" step="0.5" placeholder="Max">
+                </div>
+                <span class="hint">Random delay range between Bing requests.</span>
+            </div>
+        </div>
+        <div class="form-row">
+            <div class="form-group">
+                <label for="ddg_concurrency">DDG — Parallel Scrapes</label>
+                <input type="number" id="ddg_concurrency" name="ddg_concurrency"
+                       value="{{ settings.get('ddg_concurrency', 5) }}" min="1" max="20">
+                <span class="hint">Simultaneous DuckDuckGo queries.</span>
+            </div>
+            <div class="form-group">
+                <label>DDG — Delay Range (sec)</label>
+                <div style="display: flex; gap: 8px; align-items: center;">
+                    <input type="number" id="ddg_delay_min" name="ddg_delay_min"
+                           value="{{ settings.get('ddg_delay_min', 1.0) }}" min="0.5" max="30" step="0.5" placeholder="Min">
+                    <span class="hint" style="margin:0;">–</span>
+                    <input type="number" id="ddg_delay_max" name="ddg_delay_max"
+                           value="{{ settings.get('ddg_delay_max', 3.0) }}" min="1" max="60" step="0.5" placeholder="Max">
+                </div>
+                <span class="hint">Random delay range between DDG requests.</span>
             </div>
         </div>
     </div>
