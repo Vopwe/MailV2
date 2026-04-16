@@ -185,6 +185,9 @@ def get_all_settings() -> dict:
         "max_pages_per_domain": MAX_PAGES_PER_DOMAIN,
         "urls_per_batch": URLS_PER_BATCH,
         "verify_timeout": VERIFY_TIMEOUT,
+        "robots_txt_mode": "soft",
+        "openrouter_api_key": "",
+        "openrouter_model": "openrouter/free",
     }
     settings = _load_settings()
     defaults.update(settings)

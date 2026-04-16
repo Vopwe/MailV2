@@ -289,32 +289,32 @@
         {% endif %}
     </div>
 
-    <div class="form-actions">
+    <div class="settings-panel" id="tab-logs">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+            <h2 style="margin: 0; border: none; padding: 0;">Server Logs</h2>
+            <div class="header-actions" style="display: flex; gap: 10px; align-items: center;">
+                <button type="button" class="btn btn-secondary btn-sm" onclick="refreshLogs()">Refresh</button>
+                <label style="display: inline-flex; align-items: center; gap: 6px; font-size: 0.85rem; margin: 0;">
+                    <input type="checkbox" id="auto-refresh" style="width: auto; margin:0;" checked> Auto-refresh
+                </label>
+                <select id="log-lines" style="width: auto; padding: 4px 8px; font-size: 0.85rem;">
+                    <option value="50">50 lines</option>
+                    <option value="100" selected>100 lines</option>
+                    <option value="200">200 lines</option>
+                    <option value="500">500 lines</option>
+                </select>
+            </div>
+        </div>
+        <div id="log-meta" class="hint" style="margin-bottom: 8px;"></div>
+        <div id="log-container" style="background: var(--bg); border: 1px solid var(--border); border-radius: 4px; padding: 16px; min-height: 400px; max-height: 50vh; overflow-y: auto; font-family: 'Courier New', monospace; font-size: 0.8rem; line-height: 1.6; white-space: pre-wrap; word-break: break-all; color: var(--text-muted);">
+            Loading...
+        </div>
+    </div>
+
+    <div class="form-actions" id="form-save-actions">
         <button type="submit" class="btn btn-primary">Save Settings</button>
     </div>
 </form>
-
-<div class="settings-panel" id="tab-logs">
-    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
-        <h2>Server Logs</h2>
-        <div class="header-actions" style="display: flex; gap: 10px; align-items: center;">
-            <button type="button" class="btn btn-secondary btn-sm" onclick="refreshLogs()">Refresh</button>
-            <label style="display: inline-flex; align-items: center; gap: 6px; font-size: 0.85rem; margin: 0;">
-                <input type="checkbox" id="auto-refresh" style="width: auto; margin:0;" checked> Auto-refresh
-            </label>
-            <select id="log-lines" style="width: auto; padding: 4px 8px; font-size: 0.85rem;">
-                <option value="50">50 lines</option>
-                <option value="100" selected>100 lines</option>
-                <option value="200">200 lines</option>
-                <option value="500">500 lines</option>
-            </select>
-        </div>
-    </div>
-    <div id="log-meta" class="hint" style="margin-bottom: 8px;"></div>
-    <div id="log-container" style="background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; padding: 16px; min-height: 400px; max-height: 50vh; overflow-y: auto; font-family: 'Courier New', monospace; font-size: 0.8rem; line-height: 1.6; white-space: pre-wrap; word-break: break-all; color: var(--text-secondary);">
-        Loading...
-    </div>
-</div>
 
 {% endblock %}
 
@@ -328,6 +328,10 @@ document.querySelectorAll('.settings-tab').forEach(tab => {
         document.querySelectorAll('.settings-panel').forEach(p => p.classList.remove('active'));
         tab.classList.add('active');
         document.getElementById('tab-' + tab.dataset.tab).classList.add('active');
+
+        const saveActions = document.getElementById('form-save-actions');
+        if (saveActions) saveActions.style.display = tab.dataset.tab === 'logs' ? 'none' : '';
+
         if(tab.dataset.tab === 'logs') {
             refreshLogs();
             toggleAutoRefresh();
