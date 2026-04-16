@@ -356,7 +356,7 @@ async function refreshLogs() {
             let cls = '';
             if (line.includes('ERROR') || line.includes('error')) cls = 'log-error';
             else if (line.includes('WARNING') || line.includes('warning')) cls = 'log-warn';
-            else if (line.includes('INFO') || line.includes('Bing via IP') || line.includes('OpenRouter')) cls = 'log-info';
+            else if (line.includes('INFO') || line.includes('via IP') || line.includes('OpenRouter')) cls = 'log-info';
             return `<span class="${cls}">${escapeHtml(line)}</span>`;
         }).join('\n');
 

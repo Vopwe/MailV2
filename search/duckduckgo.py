@@ -84,8 +84,10 @@ def _filter_ddg_urls(raw_urls: list[str]) -> list[str]:
     return valid
 
 
-async def _scrape_ddg_page(query: str) -> list[str]:
+async def _scrape_ddg_page(query: str, ip: str | None = None) -> list[str]:
     """Scrape a single DDG HTML lite page. Returns list of URLs."""
+    from search.rotator import cooldown_ip
+
     headers = {
         "User-Agent": ua.random,
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
@@ -93,8 +95,17 @@ async def _scrape_ddg_page(query: str) -> list[str]:
         "Referer": "https://duckduckgo.com/",
     }
 
+    transport = None
+    if ip:
+        try:
+            transport = httpx.AsyncHTTPTransport(local_address=ip)
+        except Exception as e:
+            logger.debug(f"DDG failed to bind to IP {ip}: {e}")
+            transport = None
+
     try:
         async with httpx.AsyncClient(
+            transport=transport,
             timeout=httpx.Timeout(15.0),
             headers=headers,
             follow_redirects=True,
@@ -103,12 +114,18 @@ async def _scrape_ddg_page(query: str) -> list[str]:
             # DDG HTML lite uses POST for searches
             resp = await client.post(DDG_URL, data={"q": query, "b": ""})
 
+            if resp.status_code == 429:
+                logger.warning(f"DDG 429 rate limit on IP {ip or 'default'}")
+                if ip:
+                    cooldown_ip(ip)
+                return []
+
             if resp.status_code != 200:
                 logger.warning(f"DDG returned {resp.status_code} for: {query[:60]}")
                 return []
 
             urls = _parse_ddg_results(resp.text)
-            logger.debug(f"DDG: {len(urls)} URLs for: {query[:50]}")
+            logger.info(f"DDG via IP {ip or 'default'}: {len(urls)} results")
             return urls
 
     except Exception as e:
@@ -126,6 +143,8 @@ async def scrape_ddg(niche: str, city: str, country: str, count: int = 40) -> li
     Scrape DuckDuckGo for business URLs.
     Returns filtered, deduplicated list of URLs.
     """
+    from search.rotator import get_next_ip
+
     queries = [
         f'{niche} in {city} {country}',
         f'{niche} {city} contact email',
@@ -141,8 +160,9 @@ async def scrape_ddg(niche: str, city: str, country: str, count: int = 40) -> li
 
     all_urls = []
     for i, q in enumerate(queries):
+        ip = get_next_ip()
         logger.info(f"DDG query [{i+1}/{len(queries)}]: {q}")
-        page_urls = await _scrape_ddg_page(q)
+        page_urls = await _scrape_ddg_page(q, ip=ip)
         all_urls.extend(page_urls)
 
         filtered = _filter_ddg_urls(all_urls)
