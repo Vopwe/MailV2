@@ -80,6 +80,7 @@ def step1():
         else:
             set_app_password(pw)
             session["authenticated"] = True
+            session["is_admin"] = True
             return redirect(url_for("onboarding.step2"))
 
     body = """

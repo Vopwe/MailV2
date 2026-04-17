@@ -603,6 +603,23 @@ class RegressionTests(unittest.TestCase):
         self.assertIn('name="smtp_mail_from"', html)
         self.assertIn("Verifier SMTP identity is using automatic fallbacks", html)
 
+    def test_onboarding_password_creation_grants_admin_session(self):
+        app = create_app()
+        app.testing = True
+        app.config["WTF_CSRF_ENABLED"] = False
+        client = app.test_client()
+
+        response = client.post(
+            "/onboarding/",
+            data={"password": "supersecret"},
+            follow_redirects=False,
+        )
+
+        self.assertEqual(response.status_code, 302)
+        with client.session_transaction() as session_state:
+            self.assertTrue(session_state.get("authenticated"))
+            self.assertTrue(session_state.get("is_admin"))
+
     def test_non_admin_cannot_save_smtp_identity_fields(self):
         config.save_settings({"onboarded": True})
         app = create_app()
