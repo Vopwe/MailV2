@@ -1,12 +1,40 @@
 """
 Settings — Bing scraper config, crawl config, IP management, password, license.
 """
+import re
+
 from flask import Blueprint, render_template, request, redirect, url_for, flash
 import config
 from web.auth import get_app_password, set_app_password, check_password, is_admin_session
 from licensing import validator as license_validator
 
 bp = Blueprint("settings", __name__)
+_SMTP_FQDN_RE = re.compile(r"^[A-Za-z0-9.-]+\.[A-Za-z]{2,}$")
+
+
+def _smtp_identity_status(settings: dict) -> dict:
+    ehlo = (settings.get("smtp_ehlo_hostname", "") or "").strip()
+    mail_from = (settings.get("smtp_mail_from", "") or "").strip()
+
+    if not ehlo and not mail_from:
+        return {
+            "level": "warning",
+            "message": "Verifier SMTP identity is using automatic fallbacks. Set both values for stable mailbox checks.",
+        }
+    if not ehlo or not mail_from:
+        return {
+            "level": "warning",
+            "message": "Set both SMTP EHLO Hostname and SMTP MAIL FROM. Partial SMTP identity can reduce verification reliability.",
+        }
+    if not _SMTP_FQDN_RE.match(ehlo) or "@" not in mail_from or " " in mail_from:
+        return {
+            "level": "warning",
+            "message": "SMTP identity looks misconfigured. Use a real hostname like mail.yourdomain.com and a mailbox like verify@yourdomain.com.",
+        }
+    return {
+        "level": "success",
+        "message": "Verifier SMTP identity looks configured. Keep PTR/rDNS aligned with the EHLO hostname.",
+    }
 
 
 @bp.route("/license", methods=["POST"])
@@ -50,8 +78,7 @@ def index():
                     set_app_password(new_password)
                     flash("Password updated.", "success")
             elif remove_pw == "1":
-                config.save_settings({"app_password": "", "app_password_hash": ""})
-                flash("Password protection removed.", "success")
+                flash("Only the admin can remove password protection.", "error")
             else:
                 flash("No changes.", "success")
             return redirect(url_for("settings.index"))
@@ -76,11 +103,18 @@ def index():
             "max_pages_per_domain": int(request.form.get("max_pages_per_domain", 5)),
             "urls_per_batch": int(request.form.get("urls_per_batch", 40)),
             "verify_timeout": int(request.form.get("verify_timeout", 10)),
+            "smtp_ehlo_hostname": request.form.get("smtp_ehlo_hostname", "").strip(),
+            "smtp_mail_from": request.form.get("smtp_mail_from", "").strip(),
             "robots_txt_mode": request.form.get("robots_txt_mode", "soft").strip(),
             "openrouter_api_key": request.form.get("openrouter_api_key", "").strip(),
             "openrouter_model": request.form.get("openrouter_model", "openrouter/free").strip(),
         }
         config.save_settings(updates)
+        try:
+            from verification import verifier
+            verifier.clear_mx_cache()
+        except Exception:
+            pass
 
         # Handle password change
         new_password = request.form.get("new_password", "").strip()
@@ -106,7 +140,14 @@ def index():
     settings = config.get_all_settings()
 
     # Get IP rotator status
-    ip_status = {"total_ips": 0, "available_ips": 0, "cooled_down_ips": 0, "cooldown_list": []}
+    ip_status = {
+        "total_ips": 0,
+        "available_ips": 0,
+        "cooled_down_ips": 0,
+        "cooldown_list": [],
+        "unhealthy_ips": 0,
+        "unhealthy_list": [],
+    }
     try:
         from search.rotator import get_status
         ip_status = get_status()
@@ -116,6 +157,7 @@ def index():
     has_password = bool(get_app_password())
     runtime_paths = config.get_runtime_paths()
     license_state = license_validator.validate().to_dict()
+    smtp_status = _smtp_identity_status(settings) if is_admin_session() else None
     return render_template(
         "settings.html",
         settings=settings,
@@ -123,4 +165,5 @@ def index():
         ip_status=ip_status,
         runtime_paths=runtime_paths,
         license_state=license_state,
+        smtp_status=smtp_status,
     )

@@ -86,7 +86,7 @@ def _filter_ddg_urls(raw_urls: list[str]) -> list[str]:
 
 async def _scrape_ddg_page(query: str, ip: str | None = None) -> list[str]:
     """Scrape a single DDG HTML lite page. Returns list of URLs."""
-    from search.rotator import cooldown_ip
+    from search.rotator import cooldown_ip, mark_ip_unhealthy, record_ip_healthy
 
     headers = {
         "User-Agent": ua.random,
@@ -101,6 +101,7 @@ async def _scrape_ddg_page(query: str, ip: str | None = None) -> list[str]:
             transport = httpx.AsyncHTTPTransport(local_address=ip)
         except Exception as e:
             logger.debug(f"DDG failed to bind to IP {ip}: {e}")
+            mark_ip_unhealthy(ip, f"bind failed: {e}")
             transport = None
 
     try:
@@ -125,12 +126,16 @@ async def _scrape_ddg_page(query: str, ip: str | None = None) -> list[str]:
                 logger.warning(f"DDG returned {resp.status_code} for: {query[:60]}")
                 return []
 
+            if ip:
+                record_ip_healthy(ip)
             urls = _parse_ddg_results(resp.text)
             logger.info(f"DDG via IP {ip or 'default'}: {len(urls)} results")
             return urls
 
     except Exception as e:
         logger.error(f"DDG scrape error: {e}")
+        if ip:
+            mark_ip_unhealthy(ip, str(e))
         return []
     finally:
         import config

@@ -2,6 +2,7 @@ import asyncio
 import csv
 import io
 import os
+import socket
 import sqlite3
 import shutil
 import threading
@@ -13,12 +14,14 @@ import uuid
 
 import config
 import database
+import dns.resolver
 import logging_setup
 import tasks
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from licensing import validator as license_validator
 from search.ai_generator import generate_ai_urls_with_meta
+from search import rotator
 from verification import verifier
 from web import create_app
 from web.routes._campaign_runner import run_campaign
@@ -101,6 +104,10 @@ class RegressionTests(unittest.TestCase):
 
     def tearDown(self):
         os.environ.pop("GM_SKIP_LICENSE", None)
+        os.environ.pop("GM_SMTP_EHLO_HOSTNAME", None)
+        os.environ.pop("SMTP_EHLO_HOSTNAME", None)
+        os.environ.pop("GM_SMTP_MAIL_FROM", None)
+        os.environ.pop("SMTP_MAIL_FROM", None)
         tasks._tasks.clear()
         self._license_context.__exit__(None, None, None)
         self._db_context.__exit__(None, None, None)
@@ -520,6 +527,154 @@ class RegressionTests(unittest.TestCase):
 
         self.assertTrue(state.valid)
         self.assertEqual(state.customer, "admin")
+
+    def test_rotator_skips_dead_ipv6_and_caches_healthy_ip(self):
+        class _ConnectionStub:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        attempts = []
+
+        def fake_getaddrinfo(host, port, family, socktype):
+            self.assertEqual(family, socket.AF_INET6)
+            return [(family, socktype, 6, "", ("2606:4700::1111", port, 0, 0))]
+
+        def fake_create_connection(address, timeout=None, source_address=None):
+            attempts.append(source_address[0])
+            if source_address[0] == "2001:db8::1":
+                raise OSError("network unreachable")
+            return _ConnectionStub()
+
+        rotator._index = 0
+        rotator._cooldowns.clear()
+        rotator._health_cache.clear()
+
+        with patch("search.rotator.config.get_setting", return_value=["2001:db8::1", "2001:db8::2"]), \
+             patch.object(rotator, "HEALTHCHECK_HOSTS", ("www.bing.com",)), \
+             patch("search.rotator.socket.getaddrinfo", side_effect=fake_getaddrinfo), \
+             patch("search.rotator.socket.create_connection", side_effect=fake_create_connection):
+            first = rotator.get_next_ip()
+            second = rotator.get_next_ip()
+
+        self.assertEqual(first, "2001:db8::2")
+        self.assertEqual(second, "2001:db8::2")
+        self.assertEqual(attempts, ["2001:db8::1", "2001:db8::2"])
+        self.assertFalse(rotator._get_cached_health("2001:db8::1"))
+        self.assertTrue(rotator._get_cached_health("2001:db8::2"))
+
+    def test_verifier_uses_configured_ipv6_safe_identity(self):
+        verifier.clear_mx_cache()
+        os.environ["GM_SMTP_EHLO_HOSTNAME"] = "mx.example.com"
+        os.environ["GM_SMTP_MAIL_FROM"] = "verify@example.com"
+
+        with patch("verification.verifier.socket.getfqdn", side_effect=AssertionError("should not probe fqdn")):
+            self.assertEqual(verifier._get_ehlo_hostname(), "mx.example.com")
+            self.assertEqual(verifier._get_mail_from_address(), "verify@example.com")
+
+    def test_verifier_accepts_aaaa_only_domains_in_dns_fallback(self):
+        def fake_resolve(domain, record_type):
+            if record_type == "A":
+                raise dns.resolver.NoAnswer()
+            if record_type == "AAAA":
+                return [object()]
+            raise AssertionError(f"Unexpected record type: {record_type}")
+
+        with patch("verification.verifier.dns.resolver.resolve", side_effect=fake_resolve):
+            self.assertTrue(verifier._check_domain_a_record("example.com"))
+
+    def test_admin_settings_page_shows_smtp_identity_fields(self):
+        config.save_settings({"onboarded": True})
+        app = create_app()
+        app.testing = True
+        client = app.test_client()
+
+        with client.session_transaction() as session_state:
+            session_state["authenticated"] = True
+            session_state["is_admin"] = True
+
+        response = client.get("/settings/", follow_redirects=False)
+        html = response.get_data(as_text=True)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('name="smtp_ehlo_hostname"', html)
+        self.assertIn('name="smtp_mail_from"', html)
+        self.assertIn("Verifier SMTP identity is using automatic fallbacks", html)
+
+    def test_non_admin_cannot_save_smtp_identity_fields(self):
+        config.save_settings({"onboarded": True})
+        app = create_app()
+        app.testing = True
+        app.config["WTF_CSRF_ENABLED"] = False
+        client = app.test_client()
+
+        with client.session_transaction() as session_state:
+            session_state["authenticated"] = True
+            session_state["is_admin"] = False
+
+        response = client.post(
+            "/settings/",
+            data={
+                "smtp_ehlo_hostname": "mail.example.com",
+                "smtp_mail_from": "verify@example.com",
+            },
+            follow_redirects=False,
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(config.get_setting("smtp_ehlo_hostname", ""), "")
+        self.assertEqual(config.get_setting("smtp_mail_from", ""), "")
+
+    def test_non_admin_cannot_remove_global_password(self):
+        config.save_settings({"onboarded": True, "app_password": "", "app_password_hash": "hash"})
+        app = create_app()
+        app.testing = True
+        app.config["WTF_CSRF_ENABLED"] = False
+        client = app.test_client()
+
+        with client.session_transaction() as session_state:
+            session_state["authenticated"] = True
+            session_state["is_admin"] = False
+
+        response = client.post(
+            "/settings/",
+            data={"remove_password": "1"},
+            follow_redirects=False,
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(config.get_setting("app_password_hash", ""), "hash")
+
+    def test_admin_saving_smtp_identity_clears_verifier_identity_cache(self):
+        config.save_settings({"onboarded": True})
+        verifier._ehlo_hostname = "stale.example.com"
+        verifier._mail_from_address = "stale@example.com"
+
+        app = create_app()
+        app.testing = True
+        app.config["WTF_CSRF_ENABLED"] = False
+        client = app.test_client()
+
+        with client.session_transaction() as session_state:
+            session_state["authenticated"] = True
+            session_state["is_admin"] = True
+
+        response = client.post(
+            "/settings/",
+            data={
+                "smtp_ehlo_hostname": "mail.example.com",
+                "smtp_mail_from": "verify@example.com",
+            },
+            follow_redirects=False,
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(config.get_setting("smtp_ehlo_hostname", ""), "mail.example.com")
+        self.assertEqual(config.get_setting("smtp_mail_from", ""), "verify@example.com")
+        self.assertIsNone(verifier._ehlo_hostname)
+        self.assertIsNone(verifier._mail_from_address)
 
 
 if __name__ == "__main__":

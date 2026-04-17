@@ -14,6 +14,7 @@ When port 25 is blocked, falls back to MX + DNS-based scoring.
 import re
 import asyncio
 import logging
+import os
 import socket
 import threading
 import uuid
@@ -104,25 +105,70 @@ _soft_risk_set: set | None = None
 
 # ── VPS hostname (resolved once) ────────────────────────────────────
 _ehlo_hostname: str | None = None
+_mail_from_address: str | None = None
+
+
+def _smtp_identity_setting(key: str) -> str:
+    for env_name in (f"GM_{key.upper()}", key.upper()):
+        value = os.getenv(env_name, "").strip()
+        if value:
+            return value
+    return str(config.get_setting(key.lower(), "") or "").strip()
+
+
+def _clean_hostname(value: str) -> str:
+    return value.strip().strip(".").lower()
+
+
+def _looks_like_hostname(value: str) -> bool:
+    value = _clean_hostname(value)
+    if not value or any(ch.isspace() for ch in value):
+        return False
+    if any(ch in "[]:/" for ch in value):
+        return False
+    return True
+
+
+def _looks_like_fqdn(value: str) -> bool:
+    value = _clean_hostname(value)
+    return _looks_like_hostname(value) and "." in value
 
 
 def _get_ehlo_hostname() -> str:
-    """Get a proper EHLO hostname. Uses the VPS FQDN or IP."""
+    """Get a stable EHLO hostname without relying on IPv4 probes."""
     global _ehlo_hostname
     if _ehlo_hostname is None:
-        try:
-            fqdn = socket.getfqdn()
-            if fqdn and "." in fqdn and fqdn != "localhost":
-                _ehlo_hostname = fqdn
-            else:
-                # Fall back to IP
-                s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-                s.connect(("8.8.8.8", 80))
-                _ehlo_hostname = f"[{s.getsockname()[0]}]"
-                s.close()
-        except Exception:
-            _ehlo_hostname = "[127.0.0.1]"
+        configured = _smtp_identity_setting("smtp_ehlo_hostname")
+        for candidate in (configured,):
+            cleaned = _clean_hostname(candidate)
+            if _looks_like_hostname(cleaned):
+                _ehlo_hostname = cleaned
+                break
+        if _ehlo_hostname is None:
+            for candidate in (socket.getfqdn(), socket.gethostname()):
+                cleaned = _clean_hostname(candidate)
+                if _looks_like_hostname(cleaned):
+                    _ehlo_hostname = cleaned
+                    break
+        if _ehlo_hostname is None:
+            _ehlo_hostname = "localhost"
     return _ehlo_hostname
+
+
+def _get_mail_from_address() -> str:
+    """Get a MAIL FROM identity decoupled from EHLO/IP selection."""
+    global _mail_from_address
+    if _mail_from_address is None:
+        configured = _smtp_identity_setting("smtp_mail_from")
+        if configured and "@" in configured and " " not in configured:
+            _mail_from_address = configured
+        else:
+            ehlo_host = _get_ehlo_hostname()
+            if _looks_like_fqdn(ehlo_host):
+                _mail_from_address = f"verify@{ehlo_host}"
+            else:
+                _mail_from_address = "postmaster@localhost.localdomain"
+    return _mail_from_address
 
 
 def _result_template() -> dict:
@@ -189,12 +235,14 @@ def _check_mx_raw(domain: str) -> tuple[bool, str | None]:
 
 
 def _check_domain_a_record(domain: str) -> bool:
-    """Check if domain has an A record (website exists)."""
-    try:
-        dns.resolver.resolve(domain, "A")
-        return True
-    except Exception:
-        return False
+    """Check if domain has an A or AAAA record (website exists)."""
+    for record_type in ("A", "AAAA"):
+        try:
+            dns.resolver.resolve(domain, record_type)
+            return True
+        except Exception:
+            continue
+    return False
 
 
 def _probe_smtp_connectivity(
@@ -346,8 +394,8 @@ async def _smtp_check_single(email: str, mx_host: str) -> str:
                 # Fallback to HELO
                 code, _ = await smtp.execute_command(f"HELO {ehlo_host}".encode())
 
-            # MAIL FROM with the VPS hostname (not a fake domain)
-            mail_from = f"verify@{ehlo_host.strip('[]')}"
+            # MAIL FROM should be a stable mailbox identity, not an IP literal.
+            mail_from = _get_mail_from_address()
             code, _ = await smtp.execute_command(f"MAIL FROM:<{mail_from}>".encode())
             if code >= 500:
                 try:
@@ -415,7 +463,7 @@ async def _smtp_batch_check(emails: list[str], mx_host: str) -> dict[str, str]:
             if code >= 500:
                 code, _ = await smtp.execute_command(f"HELO {ehlo_host}".encode())
 
-            mail_from = f"verify@{ehlo_host.strip('[]')}"
+            mail_from = _get_mail_from_address()
             code, _ = await smtp.execute_command(f"MAIL FROM:<{mail_from}>".encode())
             if code >= 500:
                 try:
@@ -907,7 +955,8 @@ async def verify_emails_batch(emails: list[dict], on_progress=None) -> tuple[lis
 
 def clear_mx_cache():
     """Clear all caches between verification runs."""
-    global _mx_cache, _smtp_available, _safe_roles_set, _soft_risk_set, _mx_semaphores
+    global _mx_cache, _smtp_available, _safe_roles_set, _soft_risk_set
+    global _mx_semaphores, _ehlo_hostname, _mail_from_address
     with _mx_lock:
         _mx_cache.clear()
     with _catch_all_lock:
@@ -918,3 +967,5 @@ def clear_mx_cache():
     _safe_roles_set = None
     _soft_risk_set = None
     _mx_semaphores = {}
+    _ehlo_hostname = None
+    _mail_from_address = None

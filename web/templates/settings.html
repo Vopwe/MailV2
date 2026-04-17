@@ -256,6 +256,34 @@
                 <span class="hint">Max wait for SMTP verification per email.</span>
             </div>
         </div>
+        <div class="form-row">
+            <div class="form-group">
+                <label for="smtp_ehlo_hostname">SMTP EHLO Hostname</label>
+                <input type="text" id="smtp_ehlo_hostname" name="smtp_ehlo_hostname"
+                       value="{{ settings.get('smtp_ehlo_hostname', '') }}"
+                       placeholder="mail.yourdomain.com" autocapitalize="off" spellcheck="false">
+                <span class="hint">Admin-only. Stable hostname the verifier sends in EHLO/HELO. Should match your primary SMTP IP's PTR/rDNS.</span>
+            </div>
+            <div class="form-group">
+                <label for="smtp_mail_from">SMTP MAIL FROM</label>
+                <input type="email" id="smtp_mail_from" name="smtp_mail_from"
+                       value="{{ settings.get('smtp_mail_from', '') }}"
+                       placeholder="verify@yourdomain.com" autocapitalize="off" spellcheck="false">
+                <span class="hint">Admin-only. Sender used for SMTP verification probes. Use a real mailbox on your domain.</span>
+            </div>
+        </div>
+        <div class="form-row">
+            <div class="form-group" style="flex: 1 1 100%;">
+                {% if smtp_status %}
+                <div style="padding: 10px 12px; border-radius: 4px; font-size: 13px; margin-bottom: 12px; {% if smtp_status.level == 'success' %}background: #D1FAE5; color: #065F46;{% else %}background: #FEF3C7; color: #92400E;{% endif %}">
+                    {{ smtp_status.message }}
+                </div>
+                {% endif %}
+                <div style="padding: 10px 12px; background: #F3F4F6; color: #374151; border-radius: 4px; font-size: 13px;">
+                    Verification always uses the server's primary default route. Search IP rotation does not apply here.
+                </div>
+            </div>
+        </div>
     </div>
 
     {% endif %}

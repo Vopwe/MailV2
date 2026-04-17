@@ -17,7 +17,7 @@ from bs4 import BeautifulSoup
 from fake_useragent import UserAgent
 
 import config
-from search.rotator import get_next_ip, cooldown_ip
+from search.rotator import cooldown_ip, get_next_ip, mark_ip_unhealthy, record_ip_healthy
 from search.queries import build_queries
 
 logger = logging.getLogger(__name__)
@@ -300,6 +300,7 @@ async def _scrape_bing_page(query: str, first: int = 0, mkt: str = "en-US", cc: 
             transport = httpx.AsyncHTTPTransport(local_address=ip)
         except Exception as e:
             logger.debug(f"Failed to bind to IP {ip}: {e}")
+            mark_ip_unhealthy(ip, f"bind failed: {e}")
             transport = None
 
     try:
@@ -330,12 +331,16 @@ async def _scrape_bing_page(query: str, first: int = 0, mkt: str = "en-US", cc: 
                     cooldown_ip(ip)
                 return [], True
 
+            if ip:
+                record_ip_healthy(ip)
             urls = _parse_bing_results(html)
             logger.info(f"Bing via IP {ip or 'default'}: {len(urls)} results")
             return urls, False
 
     except Exception as e:
         logger.error(f"Bing scrape error: {e}")
+        if ip:
+            mark_ip_unhealthy(ip, str(e))
         return [], False
     finally:
         # Random delay between requests
