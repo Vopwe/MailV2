@@ -3,7 +3,7 @@ Settings — Bing scraper config, crawl config, IP management, password, license
 """
 from flask import Blueprint, render_template, request, redirect, url_for, flash
 import config
-from web.auth import get_app_password, set_app_password, check_password
+from web.auth import get_app_password, set_app_password, check_password, is_admin_session
 from licensing import validator as license_validator
 
 bp = Blueprint("settings", __name__)
@@ -12,6 +12,9 @@ bp = Blueprint("settings", __name__)
 @bp.route("/license", methods=["POST"])
 def update_license():
     """Replace the installed license file from the Settings → License tab."""
+    if not is_admin_session():
+        flash("Only the admin can change the license.", "error")
+        return redirect(url_for("settings.index"))
     raw = (request.form.get("license", "") or "").strip()
     if not raw:
         flash("Paste a license key to activate.", "error")
@@ -33,6 +36,26 @@ def update_license():
 @bp.route("/", methods=["GET", "POST"])
 def index():
     if request.method == "POST":
+        admin = is_admin_session()
+
+        if not admin:
+            # Non-admin users may only manage their own password (Security tab).
+            new_password = request.form.get("new_password", "").strip()
+            remove_pw = request.form.get("remove_password", "")
+            if new_password:
+                current_pw = request.form.get("current_password", "").strip()
+                if get_app_password() and not check_password(current_pw):
+                    flash("Current password is incorrect. Password not changed.", "error")
+                else:
+                    set_app_password(new_password)
+                    flash("Password updated.", "success")
+            elif remove_pw == "1":
+                config.save_settings({"app_password": "", "app_password_hash": ""})
+                flash("Password protection removed.", "success")
+            else:
+                flash("No changes.", "success")
+            return redirect(url_for("settings.index"))
+
         # Parse outbound IPs from textarea (one per line)
         ips_raw = request.form.get("outbound_ips", "").strip()
         outbound_ips = [ip.strip() for ip in ips_raw.splitlines() if ip.strip()]

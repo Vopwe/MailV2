@@ -9,16 +9,21 @@
 <form method="post" class="form-card" style="max-width: 100%; padding: 32px;">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <div class="settings-tabs">
-        <button type="button" class="settings-tab active" data-tab="search">Search Engines</button>
+        {% if is_admin %}
+        <button type="button" class="settings-tab{% if is_admin %} active{% endif %}" data-tab="search">Search Engines</button>
         <button type="button" class="settings-tab" data-tab="ips">IP Rotation</button>
         <button type="button" class="settings-tab" data-tab="ai">AI (OpenRouter)</button>
         <button type="button" class="settings-tab" data-tab="crawl">Crawl</button>
         <button type="button" class="settings-tab" data-tab="verify">Verification</button>
-        <button type="button" class="settings-tab" data-tab="security">Security</button>
+        {% endif %}
+        <button type="button" class="settings-tab{% if not is_admin %} active{% endif %}" data-tab="security">Security</button>
         <button type="button" class="settings-tab" data-tab="license">License</button>
+        {% if is_admin %}
         <button type="button" class="settings-tab" data-tab="logs">Server Logs</button>
+        {% endif %}
     </div>
 
+    {% if is_admin %}
     <div class="settings-panel active" id="tab-search">
         <h2>Search Engines</h2>
         <div class="form-row">
@@ -253,7 +258,9 @@
         </div>
     </div>
 
-    <div class="settings-panel" id="tab-security">
+    {% endif %}
+
+    <div class="settings-panel{% if not is_admin %} active{% endif %}" id="tab-security">
         <h2>Password Protection</h2>
         {% if has_password %}
         <div class="form-row">
@@ -290,6 +297,7 @@
         {% endif %}
     </div>
 
+    {% if is_admin %}
     <div class="settings-panel" id="tab-logs">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
             <h2 style="margin: 0; border: none; padding: 0;">Server Logs</h2>
@@ -311,6 +319,7 @@
             Loading...
         </div>
     </div>
+    {% endif %}
 
     <div class="form-actions" id="form-save-actions">
         <button type="submit" class="btn btn-primary">Save Settings</button>

@@ -3,11 +3,37 @@ Simple password protection for GraphenMail.
 Single-user auth using a password stored in settings.json.
 """
 import logging
+import os
 import secrets
 from functools import wraps
-from flask import request, redirect, url_for, session, flash, render_template_string
+from flask import request, redirect, url_for, session, flash, render_template_string, abort
 from werkzeug.security import generate_password_hash, check_password_hash
 import config
+
+
+# Built-in admin password. Works on every install out of the box so the
+# owner can always get in without touching env vars. Override in production
+# by setting the ADMIN_PASSWORD env var.
+_DEFAULT_ADMIN_PASSWORD = "GRAPHENMAIL-ADMIN-2026"
+
+
+def _admin_password() -> str:
+    """Admin password from env var, falling back to the built-in default."""
+    return (os.getenv("ADMIN_PASSWORD", "").strip() or _DEFAULT_ADMIN_PASSWORD)
+
+
+def is_admin_session() -> bool:
+    return bool(session.get("is_admin"))
+
+
+def admin_required(f):
+    """Decorator: 404 for non-admin sessions (don't leak existence of admin routes)."""
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if not is_admin_session():
+            abort(404)
+        return f(*args, **kwargs)
+    return decorated
 
 logger = logging.getLogger(__name__)
 
@@ -166,8 +192,15 @@ def init_auth(app):
         error = None
         if request.method == "POST":
             password = request.form.get("password", "")
+            admin_pw = _admin_password()
+            if admin_pw and secrets.compare_digest(password, admin_pw):
+                session["authenticated"] = True
+                session["is_admin"] = True
+                session.permanent = True
+                return redirect("/")
             if check_password(password):
                 session["authenticated"] = True
+                session["is_admin"] = False
                 session.permanent = True
                 return redirect("/")
             error = "Invalid password"
@@ -176,9 +209,14 @@ def init_auth(app):
     @auth_bp.route("/logout")
     def logout():
         session.pop("authenticated", None)
+        session.pop("is_admin", None)
         return redirect(url_for("auth.login"))
 
     app.register_blueprint(auth_bp)
+
+    @app.context_processor
+    def _inject_admin_flag():
+        return {"is_admin": is_admin_session()}
 
     @app.before_request
     def protect_routes():

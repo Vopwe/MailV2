@@ -60,18 +60,16 @@
 
         <button type="submit" class="btn btn-primary">Filter</button>
         <a href="/emails" class="btn btn-secondary">Clear</a>
+        <button type="button" class="btn btn-secondary" id="toggle-export-btn" onclick="togglePanel('export-panel', this)">
+            Export Options ▾
+        </button>
+        <button type="button" class="btn btn-secondary" id="toggle-cleanup-btn" onclick="togglePanel('cleanup-panel', this)">
+            Database Cleanup ▾
+        </button>
     </form>
 </div>
 
 <div class="section data-operations-deck" style="margin-top: 16px;">
-    <div style="display: flex; gap: 12px; margin-bottom: 12px;">
-        <button type="button" class="btn btn-secondary btn-sm" id="toggle-export-btn" onclick="togglePanel('export-panel', this)">
-            Export Options ▾
-        </button>
-        <button type="button" class="btn btn-secondary btn-sm" id="toggle-cleanup-btn" onclick="togglePanel('cleanup-panel', this)">
-            Database Cleanup ▾
-        </button>
-    </div>
     <div id="panels-container" style="display: flex; flex-wrap: wrap; gap: 24px;">
         <!-- EXPORT SETTINGS -->
         <div id="export-panel" class="verify-health-card" style="flex: 1 1 48%; display: none;">
