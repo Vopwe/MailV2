@@ -1,6 +1,6 @@
 """
 Simple password protection for GraphenMail.
-Single-user auth using a password stored in settings.json.
+Single-user auth using hashed passwords stored in settings.json or env vars.
 """
 import logging
 import os
@@ -9,17 +9,6 @@ from functools import wraps
 from flask import request, redirect, url_for, session, flash, render_template_string, abort
 from werkzeug.security import generate_password_hash, check_password_hash
 import config
-
-
-# Built-in admin password. Works on every install out of the box so the
-# owner can always get in without touching env vars. Override in production
-# by setting the ADMIN_PASSWORD env var.
-_DEFAULT_ADMIN_PASSWORD = "GRAPHENMAIL-ADMIN-2026"
-
-
-def _admin_password() -> str:
-    """Admin password from env var, falling back to the built-in default."""
-    return (os.getenv("ADMIN_PASSWORD", "").strip() or _DEFAULT_ADMIN_PASSWORD)
 
 
 def is_admin_session() -> bool:
@@ -36,6 +25,60 @@ def admin_required(f):
     return decorated
 
 logger = logging.getLogger(__name__)
+
+
+def _is_legacy_sha256(stored_hash: str) -> bool:
+    return len(stored_hash) == 64 and all(c in "0123456789abcdef" for c in stored_hash)
+
+
+def _verify_password_hash(stored_hash: str, password: str) -> bool:
+    import hashlib as _hashlib
+
+    if not stored_hash:
+        return False
+    if stored_hash.startswith(("pbkdf2:", "scrypt:", "argon2:")):
+        return check_password_hash(stored_hash, password)
+    if _is_legacy_sha256(stored_hash):
+        return _hashlib.sha256(password.encode()).hexdigest() == stored_hash
+    return False
+
+
+def _configured_admin_hash() -> str:
+    return (os.getenv("GM_ADMIN_PASSWORD_HASH", "").strip()
+            or config.get_setting("admin_password_hash", "").strip())
+
+
+def set_admin_password(password: str):
+    """Set the admin password. Env vars may still override this at runtime."""
+    config.save_settings({"admin_password_hash": generate_password_hash(password)})
+
+
+def has_admin_password() -> bool:
+    return bool(
+        os.getenv("ADMIN_PASSWORD", "").strip()
+        or _configured_admin_hash()
+        or get_app_password()
+    )
+
+
+def check_admin_password(password: str) -> bool:
+    """
+    Verify admin password.
+
+    Order:
+      1. Plain env ADMIN_PASSWORD
+      2. Hashed env/settings admin password
+      3. Fallback to app password for legacy installs without a dedicated admin password
+    """
+    env_password = os.getenv("ADMIN_PASSWORD", "").strip()
+    if env_password:
+        return secrets.compare_digest(password, env_password)
+
+    admin_hash = _configured_admin_hash()
+    if admin_hash:
+        return _verify_password_hash(admin_hash, password)
+
+    return check_password(password)
 
 LOGIN_TEMPLATE = """
 <!DOCTYPE html>
@@ -141,17 +184,10 @@ def check_password(password: str) -> bool:
     stored_plain = config.get_setting("app_password", "")  # legacy
 
     if stored_hash:
-        # werkzeug hashes start with "pbkdf2:" or "scrypt:" etc; legacy SHA256 is 64 hex chars.
-        if stored_hash.startswith(("pbkdf2:", "scrypt:", "argon2:")):
-            return check_password_hash(stored_hash, password)
-        # Legacy SHA256 fallback — migrate on successful check.
-        if len(stored_hash) == 64 and all(c in "0123456789abcdef" for c in stored_hash):
-            legacy = _hashlib.sha256(password.encode()).hexdigest()
-            if legacy == stored_hash:
-                # Upgrade to werkzeug hash for future checks.
+        if _verify_password_hash(stored_hash, password):
+            if _is_legacy_sha256(stored_hash):
                 config.save_settings({"app_password_hash": generate_password_hash(password), "app_password": ""})
-                return True
-            return False
+            return True
         return False
     if stored_plain:
         ok = password == stored_plain
@@ -192,8 +228,7 @@ def init_auth(app):
         error = None
         if request.method == "POST":
             password = request.form.get("password", "")
-            admin_pw = _admin_password()
-            if admin_pw and secrets.compare_digest(password, admin_pw):
+            if check_admin_password(password):
                 session["authenticated"] = True
                 session["is_admin"] = True
                 session.permanent = True

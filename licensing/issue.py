@@ -23,22 +23,102 @@ from __future__ import annotations
 
 import argparse
 import base64
+import calendar
 import json
 import os
 import secrets
 import sys
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import (
     Ed25519PrivateKey,
-    Ed25519PublicKey,
 )
 
 
 def _b64url(data: bytes) -> str:
     return base64.urlsafe_b64encode(data).decode("ascii").rstrip("=")
+
+
+def _add_months(start: date, months: int) -> date:
+    if months < 0:
+        raise ValueError("Months must be zero or greater.")
+    month_index = start.month - 1 + months
+    year = start.year + month_index // 12
+    month = month_index % 12 + 1
+    day = min(start.day, calendar.monthrange(year, month)[1])
+    return date(year, month, day)
+
+
+def resolve_expiry(
+    *,
+    expires: str | None = None,
+    days: int | None = None,
+    months: int | None = None,
+    perpetual: bool = False,
+    today: date | None = None,
+) -> str | None:
+    supplied = sum(
+        1 for value in (
+            expires,
+            days if days is not None else None,
+            months if months is not None else None,
+            True if perpetual else None,
+        ) if value not in (None, "", False)
+    )
+    if supplied > 1:
+        raise ValueError("Choose only one expiry option.")
+    if perpetual:
+        return None
+    if expires:
+        date.fromisoformat(expires)
+        return expires
+
+    base = today or date.today()
+    if days is not None:
+        if days < 1:
+            raise ValueError("Days must be at least 1.")
+        return (base + timedelta(days=days)).isoformat()
+    if months is not None:
+        if months < 1:
+            raise ValueError("Months must be at least 1.")
+        return _add_months(base, months).isoformat()
+    return None
+
+
+def load_signing_key(path: str | Path) -> Ed25519PrivateKey:
+    key_path = Path(path)
+    if not key_path.exists():
+        raise FileNotFoundError(f"Signing key not found: {key_path}")
+
+    sk_data = key_path.read_bytes()
+    sk = serialization.load_pem_private_key(sk_data, password=None)
+    if not isinstance(sk, Ed25519PrivateKey):
+        raise ValueError("Signing key is not ed25519.")
+    return sk
+
+
+def generate_license_text(
+    *,
+    signing_key: Ed25519PrivateKey,
+    customer: str,
+    host_fingerprint: str,
+    expires_at: str | None,
+    features: list[str] | tuple[str, ...] | None = None,
+    issued_at: date | None = None,
+) -> str:
+    payload = {
+        "customer": customer,
+        "host_fingerprint": host_fingerprint.strip().lower(),
+        "issued_at": (issued_at or date.today()).isoformat(),
+        "expires_at": expires_at,
+        "features": list(features or ()),
+        "nonce": secrets.token_hex(8),
+    }
+    payload_bytes = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
+    sig = signing_key.sign(payload_bytes)
+    return f"{_b64url(payload_bytes)}.{_b64url(sig)}"
 
 
 def cmd_keygen(args: argparse.Namespace) -> int:
@@ -74,30 +154,26 @@ def cmd_keygen(args: argparse.Namespace) -> int:
 
 
 def cmd_sign(args: argparse.Namespace) -> int:
-    key_path = Path(args.signing_key)
-    if not key_path.exists():
-        print(f"Signing key not found: {key_path}", file=sys.stderr)
+    try:
+        sk = load_signing_key(args.signing_key)
+        expires_at = resolve_expiry(
+            expires=args.expires,
+            days=args.days,
+            months=args.months,
+            perpetual=args.perpetual,
+        )
+        features = [f.strip() for f in args.features.split(",") if f.strip()] if args.features else []
+        license_text = generate_license_text(
+            signing_key=sk,
+            customer=args.customer,
+            host_fingerprint=args.host_fingerprint,
+            expires_at=expires_at,
+            features=features,
+        )
+    except (FileNotFoundError, ValueError) as e:
+        print(str(e), file=sys.stderr)
         return 2
 
-    sk_data = key_path.read_bytes()
-    sk = serialization.load_pem_private_key(sk_data, password=None)
-    if not isinstance(sk, Ed25519PrivateKey):
-        print("Signing key is not ed25519.", file=sys.stderr)
-        return 2
-
-    features = [f.strip() for f in args.features.split(",") if f.strip()] if args.features else []
-    payload = {
-        "customer": args.customer,
-        "host_fingerprint": args.host_fingerprint.strip().lower(),
-        "issued_at": date.today().isoformat(),
-        "expires_at": args.expires,  # None for perpetual
-        "features": features,
-        "nonce": secrets.token_hex(8),
-    }
-    payload_bytes = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
-    sig = sk.sign(payload_bytes)
-
-    license_text = f"{_b64url(payload_bytes)}.{_b64url(sig)}"
     print(license_text)
     return 0
 
@@ -114,7 +190,11 @@ def build_parser() -> argparse.ArgumentParser:
     sg.add_argument("--signing-key", required=True, help="Path to ed25519 private key PEM")
     sg.add_argument("--customer", required=True, help="Customer name / company")
     sg.add_argument("--host-fingerprint", required=True, help="SHA256 hex from customer VPS")
-    sg.add_argument("--expires", default=None, help="Expiry date ISO (YYYY-MM-DD) or omit for perpetual")
+    expiry_group = sg.add_mutually_exclusive_group()
+    expiry_group.add_argument("--expires", default=None, help="Expiry date ISO (YYYY-MM-DD)")
+    expiry_group.add_argument("--days", type=int, default=None, help="Expire N days from today")
+    expiry_group.add_argument("--months", type=int, default=None, help="Expire N calendar months from today")
+    expiry_group.add_argument("--perpetual", action="store_true", help="Never expires")
     sg.add_argument("--features", default="", help="Comma-separated feature flags")
     sg.set_defaults(func=cmd_sign)
 

@@ -2,417 +2,471 @@
 {% block title %}Settings — GraphenMail V2{% endblock %}
 
 {% block content %}
+<style>
+  .settings-shell { max-width: 1280px; margin: 0 auto; }
+  .settings-layout { display: grid; grid-template-columns: 260px 1fr; gap: 24px; align-items: start; }
+  @media (max-width: 900px) { .settings-layout { grid-template-columns: 1fr; } }
+
+  .settings-rail { background: #fff; border: 1px solid var(--border); border-radius: 6px; padding: 12px; position: sticky; top: 24px; }
+  .settings-rail-search { position: relative; margin-bottom: 12px; }
+  .settings-rail-search input { width: 100%; padding: 8px 10px 8px 32px; border: 1px solid var(--border); border-radius: 6px; font-family: inherit; font-size: 13px; }
+  .settings-rail-search svg { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); color: var(--text-muted); }
+  .settings-rail-group { margin-bottom: 14px; }
+  .settings-rail-label { font-size: 11px; text-transform: uppercase; letter-spacing: .6px; color: var(--text-muted); font-weight: 700; padding: 6px 10px 4px; }
+  .settings-rail a { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 6px; font-size: 13px; color: var(--text); text-decoration: none; font-weight: 500; cursor: pointer; }
+  .settings-rail a:hover { background: #F3F4F6; }
+  .settings-rail a.active { background: #FFF7ED; color: var(--orange, #F97316); font-weight: 600; }
+  .settings-rail a.active .rail-dot { background: var(--orange, #F97316); }
+  .rail-dot { width: 6px; height: 6px; border-radius: 999px; background: #D1D5DB; }
+  .rail-pill { margin-left: auto; font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 999px; background: #F3F4F6; color: var(--text-muted); }
+  .rail-pill.success { background: #D1FAE5; color: #065F46; }
+
+  .settings-pane { background: #fff; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+  .settings-pane-header { padding: 20px 24px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: flex-start; }
+  .settings-pane-header h2 { font-size: 18px; font-weight: 700; margin: 0; border: none; padding: 0; }
+  .settings-pane-header .hint { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+  .settings-pane-header .badge { font-size: 11px; font-weight: 600; padding: 3px 10px; border-radius: 999px; background: #D1FAE5; color: #065F46; }
+  .settings-pane-body { padding: 24px; }
+  .settings-pane-footer { padding: 14px 24px; border-top: 1px solid var(--border); background: #FAFAFA; display: flex; justify-content: flex-end; gap: 8px; }
+
+  .settings-section { margin-bottom: 28px; }
+  .settings-section:last-child { margin-bottom: 0; }
+  .settings-section-title { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .6px; color: var(--text-muted); margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
+
+  .settings-panel { display: none; }
+  .settings-panel.active { display: block; }
+</style>
+
 <div class="page-header">
     <h1>Settings</h1>
 </div>
 
-<form method="post" class="form-card" style="max-width: 100%; padding: 32px;">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-    <div class="settings-tabs">
-        {% if is_admin %}
-        <button type="button" class="settings-tab{% if is_admin %} active{% endif %}" data-tab="search">Search Engines</button>
-        <button type="button" class="settings-tab" data-tab="ips">IP Rotation</button>
-        <button type="button" class="settings-tab" data-tab="ai">AI (OpenRouter)</button>
-        <button type="button" class="settings-tab" data-tab="crawl">Crawl</button>
-        <button type="button" class="settings-tab" data-tab="verify">Verification</button>
-        {% endif %}
-        <button type="button" class="settings-tab{% if not is_admin %} active{% endif %}" data-tab="security">Security</button>
-        <button type="button" class="settings-tab" data-tab="license">License</button>
-        {% if is_admin %}
-        <button type="button" class="settings-tab" data-tab="logs">Server Logs</button>
-        {% endif %}
+<div class="settings-shell">
+<div class="settings-layout">
+
+  <!-- LEFT RAIL -->
+  <aside class="settings-rail">
+    <div class="settings-rail-search">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+      <input type="text" id="settings-search" placeholder="Search settings…" autocomplete="off">
     </div>
 
     {% if is_admin %}
-    <div class="settings-panel active" id="tab-search">
-        <h2>Search Engines</h2>
-        <div class="form-row">
-            <div class="form-group">
-                <label for="urls_per_batch">URLs per Niche/City</label>
-                <input type="number" id="urls_per_batch" name="urls_per_batch"
-                       value="{{ settings.urls_per_batch }}" min="5" max="100">
-                <span class="hint">Max URLs scraped per niche/city combo across all engines.</span>
-            </div>
-            <div class="form-group">
-                <label for="bing_results_per_page">Results per Page</label>
-                <input type="number" id="bing_results_per_page" name="bing_results_per_page"
-                       value="{{ settings.bing_results_per_page }}" min="10" max="50" step="10">
-                <span class="hint">How many results fetched per search page (max 50).</span>
-            </div>
-        </div>
-        <div class="form-row">
-            <div class="form-group">
-                <label for="bing_concurrency">Bing — Parallel Scrapes</label>
-                <input type="number" id="bing_concurrency" name="bing_concurrency"
-                       value="{{ settings.bing_concurrency }}" min="1" max="20">
-                <span class="hint">Keep low (2–5) to avoid bans.</span>
-            </div>
-            <div class="form-group">
-                <label>Bing — Delay Range (sec)</label>
-                <div style="display: flex; gap: 8px; align-items: center;">
-                    <input type="number" id="bing_delay_min" name="bing_delay_min"
-                           value="{{ settings.bing_delay_min }}" min="0.5" max="30" step="0.5" placeholder="Min">
-                    <span class="hint" style="margin:0;">–</span>
-                    <input type="number" id="bing_delay_max" name="bing_delay_max"
-                           value="{{ settings.bing_delay_max }}" min="1" max="60" step="0.5" placeholder="Max">
-                </div>
-                <span class="hint">Random delay range between Bing requests.</span>
-            </div>
-        </div>
-        <div class="form-row">
-            <div class="form-group">
-                <label for="ddg_concurrency">DDG — Parallel Scrapes</label>
-                <input type="number" id="ddg_concurrency" name="ddg_concurrency"
-                       value="{{ settings.get('ddg_concurrency', 5) }}" min="1" max="20">
-                <span class="hint">Simultaneous DuckDuckGo queries.</span>
-            </div>
-            <div class="form-group">
-                <label>DDG — Delay Range (sec)</label>
-                <div style="display: flex; gap: 8px; align-items: center;">
-                    <input type="number" id="ddg_delay_min" name="ddg_delay_min"
-                           value="{{ settings.get('ddg_delay_min', 1.0) }}" min="0.5" max="30" step="0.5" placeholder="Min">
-                    <span class="hint" style="margin:0;">–</span>
-                    <input type="number" id="ddg_delay_max" name="ddg_delay_max"
-                           value="{{ settings.get('ddg_delay_max', 3.0) }}" min="1" max="60" step="0.5" placeholder="Max">
-                </div>
-                <span class="hint">Random delay range between DDG requests.</span>
-            </div>
-        </div>
+    <div class="settings-rail-group">
+      <div class="settings-rail-label">Scraping</div>
+      <a class="settings-tab active" data-tab="search"><span class="rail-dot"></span>Search Engines</a>
+      <a class="settings-tab" data-tab="ips"><span class="rail-dot"></span>IP Rotation{% if ip_status and ip_status.total_ips %} <span class="rail-pill">{{ ip_status.total_ips }}</span>{% endif %}</a>
+      <a class="settings-tab" data-tab="ai"><span class="rail-dot"></span>AI (OpenRouter)</a>
+      <a class="settings-tab" data-tab="crawl"><span class="rail-dot"></span>Crawl</a>
     </div>
-
-    <div class="settings-panel" id="tab-ips">
-        <h2>IP Rotation</h2>
-        <div class="form-row">
-            <div class="form-group" style="flex: 1 1 100%;">
-                <label for="outbound_ips">Outbound IP Addresses</label>
-                <textarea id="outbound_ips" name="outbound_ips" rows="10"
-                          placeholder="Enter one IP per line (IPv4 or IPv6)&#10;&#10;Example:&#10;192.168.1.100&#10;192.168.1.101&#10;2001:db8::1&#10;&#10;Leave empty to use default system IP.">{% if settings.outbound_ips %}{% for ip in settings.outbound_ips %}{{ ip }}{% if not loop.last %}
-{% endif %}{% endfor %}{% endif %}</textarea>
-                <span class="hint">
-                    One IP per line. Supports IPv4 and IPv6. IPs will be rotated round-robin for Bing requests.
-                    Leave empty to use the server's default IP.
-                    You can also create an <code>ips.txt</code> file in the project root instead.
-                </span>
-            </div>
-        </div>
-        {% if ip_status %}
-        <div class="form-row">
-            <div class="form-group" style="flex: 1 1 100%;">
-                <label>Status</label>
-                {% if ip_status.total_ips == 0 %}
-                <div style="padding: 10px 12px; background: #FEF3C7; color: #92400E; border-radius: 4px; font-size: 13px;">
-                    ⚠ No IPs configured — using server default IP.
-                </div>
-                {% elif ip_status.available_ips > 0 %}
-                <div style="padding: 10px 12px; background: #D1FAE5; color: #065F46; border-radius: 4px; font-size: 13px;">
-                    ✓ {{ ip_status.available_ips }} of {{ ip_status.total_ips }} IPs active — rotation working.
-                </div>
-                {% else %}
-                <div style="padding: 10px 12px; background: #FEE2E2; color: #991B1B; border-radius: 4px; font-size: 13px;">
-                    ⚠ All {{ ip_status.total_ips }} IPs on cooldown — waiting to recover.
-                </div>
-                {% endif %}
-            </div>
-        </div>
-        <details style="margin-top: 12px;">
-            <summary style="cursor: pointer; font-size: 13px; color: var(--text-muted); padding: 6px 0;">Advanced ▾</summary>
-            <div class="form-row" style="margin-top: 10px;">
-                <div class="form-group">
-                    <div class="ip-status-grid">
-                        <div class="stat-mini">
-                            <span class="stat-label">Total IPs</span>
-                            <span class="stat-value">{{ ip_status.total_ips }}</span>
-                        </div>
-                        <div class="stat-mini">
-                            <span class="stat-label">Available</span>
-                            <span class="stat-value" style="color: var(--success);">{{ ip_status.available_ips }}</span>
-                        </div>
-                        <div class="stat-mini">
-                            <span class="stat-label">On Cooldown</span>
-                            <span class="stat-value" style="color: var(--warning);">{{ ip_status.cooled_down_ips }}</span>
-                        </div>
-                    </div>
-                    {% if ip_status.cooldown_list %}
-                    <span class="hint" style="color: var(--warning);">
-                        Cooled down: {{ ip_status.cooldown_list | join(', ') }}
-                    </span>
-                    {% endif %}
-                </div>
-            </div>
-            <div class="form-row">
-                <div class="form-group">
-                    <button type="button" class="btn btn-secondary" onclick="refreshIpStatus()" style="margin-top: 8px;">Refresh Status</button>
-                    <span class="hint" id="ip-refresh-msg"></span>
-                </div>
-            </div>
-        </details>
-        {% endif %}
+    <div class="settings-rail-group">
+      <div class="settings-rail-label">Verification</div>
+      <a class="settings-tab" data-tab="verify"><span class="rail-dot"></span>SMTP &amp; Rules</a>
     </div>
-
-    <div class="settings-panel" id="tab-ai">
-        <h2>AI URL Generation (OpenRouter)</h2>
-        <p class="hint" style="margin-bottom: 16px;">Optional. Uses a free AI model to generate additional business URLs alongside Bing and DuckDuckGo. All three sources run in parallel.</p>
-        <div class="form-row">
-            <div class="form-group" style="flex: 1 1 100%;">
-                <label for="openrouter_api_key">OpenRouter API Key</label>
-                <input type="password" id="openrouter_api_key" name="openrouter_api_key"
-                       value="{{ settings.get('openrouter_api_key', '') }}"
-                       placeholder="sk-or-v1-...">
-                <span class="hint">
-                    Get a free key at <a href="https://openrouter.ai/keys" target="_blank" rel="noopener">openrouter.ai/keys</a>.
-                    Leave empty to disable AI URL generation.
-                </span>
-            </div>
-        </div>
-        <div class="form-row">
-            <div class="form-group" style="flex: 1 1 100%;">
-                <label>Status</label>
-                {% if settings.get('openrouter_api_key') %}
-                <div style="padding: 10px 12px; background: #D1FAE5; color: #065F46; border-radius: 4px; font-size: 13px;">
-                    ✓ AI URL generation active.
-                </div>
-                {% else %}
-                <div style="padding: 10px 12px; background: #F3F4F6; color: #374151; border-radius: 4px; font-size: 13px;">
-                    AI URL generation disabled — add an API key above to enable.
-                </div>
-                {% endif %}
-            </div>
-        </div>
-        <details style="margin-top: 12px;">
-            <summary style="cursor: pointer; font-size: 13px; color: var(--text-muted); padding: 6px 0;">Advanced ▾</summary>
-            <div class="form-row" style="margin-top: 10px;">
-                <div class="form-group" style="flex: 1 1 100%;">
-                    <label for="openrouter_model">AI Model</label>
-                    <select id="openrouter_model" name="openrouter_model">
-                        <option value="openrouter/free" {% if settings.get('openrouter_model', 'openrouter/free') == 'openrouter/free' %}selected{% endif %}>OpenRouter Free Router (Recommended)</option>
-                        <option value="google/gemma-4-31b-it:free" {% if settings.get('openrouter_model') == 'google/gemma-4-31b-it:free' %}selected{% endif %}>Gemma 4 31B (Free)</option>
-                        <option value="openai/gpt-oss-120b:free" {% if settings.get('openrouter_model') == 'openai/gpt-oss-120b:free' %}selected{% endif %}>GPT-OSS 120B (Free)</option>
-                        <option value="nvidia/nemotron-3-super-120b-a12b:free" {% if settings.get('openrouter_model') == 'nvidia/nemotron-3-super-120b-a12b:free' %}selected{% endif %}>Nemotron 3 Super 120B (Free)</option>
-                        <option value="openai/gpt-oss-20b:free" {% if settings.get('openrouter_model') == 'openai/gpt-oss-20b:free' %}selected{% endif %}>GPT-OSS 20B (Free)</option>
-                    </select>
-                    <span class="hint">Router handles failover automatically. Use specific models when you want deterministic behavior.</span>
-                </div>
-            </div>
-        </details>
-    </div>
-
-    <div class="settings-panel" id="tab-crawl">
-        <h2>Crawl Settings</h2>
-        <div class="form-row">
-            <div class="form-group">
-                <label for="max_concurrent_requests">Parallel Crawl Connections</label>
-                <input type="number" id="max_concurrent_requests" name="max_concurrent_requests"
-                       value="{{ settings.max_concurrent_requests }}" min="1" max="100">
-                <span class="hint">Domains crawled in parallel. Higher = faster but may trigger rate limits.</span>
-            </div>
-            <div class="form-group">
-                <label for="crawl_delay">Crawl Delay (seconds)</label>
-                <input type="number" id="crawl_delay" name="crawl_delay"
-                       value="{{ settings.crawl_delay }}" min="0" max="5" step="0.1">
-                <span class="hint">Wait time between sub-page requests on the same domain.</span>
-            </div>
-        </div>
-        <div class="form-row">
-            <div class="form-group">
-                <label for="request_timeout">Request Timeout (seconds)</label>
-                <input type="number" id="request_timeout" name="request_timeout"
-                       value="{{ settings.request_timeout }}" min="3" max="60">
-                <span class="hint">Max wait per page fetch before giving up.</span>
-            </div>
-            <div class="form-group">
-                <label for="max_pages_per_domain">Max Pages per Domain</label>
-                <input type="number" id="max_pages_per_domain" name="max_pages_per_domain"
-                       value="{{ settings.max_pages_per_domain }}" min="1" max="20">
-                <span class="hint">Sub-pages to scan per domain.</span>
-            </div>
-        </div>
-        <div class="form-row">
-            <div class="form-group">
-                <label for="robots_txt_mode">robots.txt Mode</label>
-                <select id="robots_txt_mode" name="robots_txt_mode">
-                    <option value="off" {% if settings.robots_txt_mode == 'off' %}selected{% endif %}>Off — Ignore robots.txt entirely</option>
-                    <option value="soft" {% if settings.get('robots_txt_mode', 'soft') == 'soft' %}selected{% endif %}>Soft — Only block admin/private paths (recommended)</option>
-                    <option value="strict" {% if settings.robots_txt_mode == 'strict' %}selected{% endif %}>Strict — Block everything robots.txt says</option>
-                </select>
-                <span class="hint">Soft mode crawls contact/about pages even if blocked.</span>
-            </div>
-            <div class="form-group"></div>
-        </div>
-    </div>
-
-    <div class="settings-panel" id="tab-verify">
-        <h2>Verification</h2>
-        <div class="form-row">
-            <div class="form-group">
-                <label for="verify_concurrency">Parallel Verifications</label>
-                <input type="number" id="verify_concurrency" name="verify_concurrency"
-                       value="{{ settings.verify_concurrency }}" min="1" max="100">
-                <span class="hint">SMTP checks running simultaneously. 30 is a good default.</span>
-            </div>
-            <div class="form-group">
-                <label for="verify_timeout">Verification Timeout (seconds)</label>
-                <input type="number" id="verify_timeout" name="verify_timeout"
-                       value="{{ settings.verify_timeout }}" min="3" max="30">
-                <span class="hint">Max wait for SMTP verification per email.</span>
-            </div>
-        </div>
-        <div class="form-row">
-            <div class="form-group">
-                <label for="smtp_ehlo_hostname">SMTP EHLO Hostname</label>
-                <input type="text" id="smtp_ehlo_hostname" name="smtp_ehlo_hostname"
-                       value="{{ settings.get('smtp_ehlo_hostname', '') }}"
-                       placeholder="mail.yourdomain.com" autocapitalize="off" spellcheck="false">
-                <span class="hint">Admin-only. Stable hostname the verifier sends in EHLO/HELO. Should match your primary SMTP IP's PTR/rDNS.</span>
-            </div>
-            <div class="form-group">
-                <label for="smtp_mail_from">SMTP MAIL FROM</label>
-                <input type="email" id="smtp_mail_from" name="smtp_mail_from"
-                       value="{{ settings.get('smtp_mail_from', '') }}"
-                       placeholder="verify@yourdomain.com" autocapitalize="off" spellcheck="false">
-                <span class="hint">Admin-only. Sender used for SMTP verification probes. Use a real mailbox on your domain.</span>
-            </div>
-        </div>
-        <div class="form-row">
-            <div class="form-group" style="flex: 1 1 100%;">
-                {% if smtp_status %}
-                <div style="padding: 10px 12px; border-radius: 4px; font-size: 13px; margin-bottom: 12px; {% if smtp_status.level == 'success' %}background: #D1FAE5; color: #065F46;{% else %}background: #FEF3C7; color: #92400E;{% endif %}">
-                    {{ smtp_status.message }}
-                </div>
-                {% endif %}
-                <div style="padding: 10px 12px; background: #F3F4F6; color: #374151; border-radius: 4px; font-size: 13px;">
-                    Verification always uses the server's primary default route. Search IP rotation does not apply here.
-                </div>
-            </div>
-        </div>
-    </div>
-
     {% endif %}
 
-    <div class="settings-panel{% if not is_admin %} active{% endif %}" id="tab-security">
-        <h2>Password Protection</h2>
-        {% if has_password %}
-        <div class="form-row">
-            <div class="form-group">
+    <div class="settings-rail-group">
+      <div class="settings-rail-label">Account</div>
+      <a class="settings-tab{% if not is_admin %} active{% endif %}" data-tab="security"><span class="rail-dot"></span>Security</a>
+      <a class="settings-tab" data-tab="license"><span class="rail-dot"></span>License{% if license_state and license_state.valid %} <span class="rail-pill success">Active</span>{% endif %}</a>
+    </div>
+
+    {% if is_admin %}
+    <div class="settings-rail-group">
+      <div class="settings-rail-label">System</div>
+      <a class="settings-tab" data-tab="logs"><span class="rail-dot"></span>Server Logs</a>
+    </div>
+    {% endif %}
+  </aside>
+
+  <!-- RIGHT PANE -->
+  <section class="settings-pane">
+    <div class="settings-pane-header">
+      <div>
+        <h2 id="pane-title">{% if is_admin %}Search Engines{% else %}Password Protection{% endif %}</h2>
+        <div class="hint" id="pane-hint">{% if is_admin %}Concurrency, delays, and results per page for Bing &amp; DuckDuckGo.{% else %}Manage the login password for this install.{% endif %}</div>
+      </div>
+      {% if is_admin %}<span class="badge">Admin</span>{% endif %}
+    </div>
+
+    <div class="settings-pane-body">
+
+      <!-- MAIN SETTINGS FORM (admin general config + security password) -->
+      <form id="main-settings-form" method="post">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+        {% if is_admin %}
+        <!-- SEARCH ENGINES -->
+        <div class="settings-panel active" id="tab-search">
+          <div class="settings-section">
+            <div class="settings-section-title">Bing</div>
+            <div class="form-row">
+              <div class="form-group">
+                <label for="bing_concurrency">Parallel Scrapes</label>
+                <input type="number" id="bing_concurrency" name="bing_concurrency" value="{{ settings.bing_concurrency }}" min="1" max="20">
+                <span class="hint">Keep low (2–5) to avoid bans.</span>
+              </div>
+              <div class="form-group">
+                <label for="bing_results_per_page">Results per Page</label>
+                <input type="number" id="bing_results_per_page" name="bing_results_per_page" value="{{ settings.bing_results_per_page }}" min="10" max="50" step="10">
+                <span class="hint">Max 50.</span>
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-group">
+                <label>Delay Range (sec)</label>
+                <div style="display:flex; gap:8px; align-items:center;">
+                  <input type="number" id="bing_delay_min" name="bing_delay_min" value="{{ settings.bing_delay_min }}" min="0.5" max="30" step="0.5">
+                  <span class="hint" style="margin:0;">–</span>
+                  <input type="number" id="bing_delay_max" name="bing_delay_max" value="{{ settings.bing_delay_max }}" min="1" max="60" step="0.5">
+                </div>
+                <span class="hint">Random delay between Bing requests.</span>
+              </div>
+              <div class="form-group">
+                <label for="urls_per_batch">URLs per Niche/City</label>
+                <input type="number" id="urls_per_batch" name="urls_per_batch" value="{{ settings.urls_per_batch }}" min="5" max="100">
+                <span class="hint">Max URLs scraped per niche/city across all engines.</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="settings-section">
+            <div class="settings-section-title">DuckDuckGo</div>
+            <div class="form-row">
+              <div class="form-group">
+                <label for="ddg_concurrency">Parallel Scrapes</label>
+                <input type="number" id="ddg_concurrency" name="ddg_concurrency" value="{{ settings.get('ddg_concurrency', 5) }}" min="1" max="20">
+                <span class="hint">Simultaneous DuckDuckGo queries.</span>
+              </div>
+              <div class="form-group">
+                <label>Delay Range (sec)</label>
+                <div style="display:flex; gap:8px; align-items:center;">
+                  <input type="number" id="ddg_delay_min" name="ddg_delay_min" value="{{ settings.get('ddg_delay_min', 1.0) }}" min="0.5" max="30" step="0.5">
+                  <span class="hint" style="margin:0;">–</span>
+                  <input type="number" id="ddg_delay_max" name="ddg_delay_max" value="{{ settings.get('ddg_delay_max', 3.0) }}" min="1" max="60" step="0.5">
+                </div>
+                <span class="hint">Random delay between DDG requests.</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- IP ROTATION -->
+        <div class="settings-panel" id="tab-ips">
+          <div class="settings-section">
+            <div class="settings-section-title">Outbound IPs</div>
+            <div class="form-row">
+              <div class="form-group" style="flex:1 1 100%;">
+                <label for="outbound_ips">One per line (IPv4 / IPv6)</label>
+                <textarea id="outbound_ips" name="outbound_ips" rows="8" placeholder="192.168.1.100&#10;2001:db8::1">{% if settings.outbound_ips %}{% for ip in settings.outbound_ips %}{{ ip }}{% if not loop.last %}
+{% endif %}{% endfor %}{% endif %}</textarea>
+                <span class="hint">Rotated round-robin for search requests. Leave empty to use server default. You can also create an <code>ips.txt</code> in the project root.</span>
+              </div>
+            </div>
+            {% if ip_status %}
+            <div class="form-row">
+              <div class="form-group" style="flex:1 1 100%;">
+                <label>Status</label>
+                {% if ip_status.total_ips == 0 %}
+                <div style="padding:10px 12px; background:#FEF3C7; color:#92400E; border-radius:4px; font-size:13px;">⚠ No IPs configured — using server default IP.</div>
+                {% elif ip_status.available_ips > 0 %}
+                <div style="padding:10px 12px; background:#D1FAE5; color:#065F46; border-radius:4px; font-size:13px;">✓ {{ ip_status.available_ips }} of {{ ip_status.total_ips }} IPs active — rotation working.</div>
+                {% else %}
+                <div style="padding:10px 12px; background:#FEE2E2; color:#991B1B; border-radius:4px; font-size:13px;">⚠ All {{ ip_status.total_ips }} IPs on cooldown — waiting to recover.</div>
+                {% endif %}
+              </div>
+            </div>
+            <details style="margin-top:12px;">
+              <summary style="cursor:pointer; font-size:13px; color:var(--text-muted); padding:6px 0;">Advanced ▾</summary>
+              <div class="form-row" style="margin-top:10px;">
+                <div class="form-group">
+                  <div class="ip-status-grid">
+                    <div class="stat-mini"><span class="stat-label">Total IPs</span><span class="stat-value">{{ ip_status.total_ips }}</span></div>
+                    <div class="stat-mini"><span class="stat-label">Available</span><span class="stat-value" style="color:var(--success);">{{ ip_status.available_ips }}</span></div>
+                    <div class="stat-mini"><span class="stat-label">On Cooldown</span><span class="stat-value" style="color:var(--warning);">{{ ip_status.cooled_down_ips }}</span></div>
+                  </div>
+                  {% if ip_status.cooldown_list %}<span class="hint" style="color:var(--warning);">Cooled down: {{ ip_status.cooldown_list | join(', ') }}</span>{% endif %}
+                </div>
+              </div>
+              <div class="form-row">
+                <div class="form-group">
+                  <button type="button" class="btn btn-secondary" onclick="refreshIpStatus()" style="margin-top:8px;">Refresh Status</button>
+                  <span class="hint" id="ip-refresh-msg"></span>
+                </div>
+              </div>
+            </details>
+            {% endif %}
+          </div>
+        </div>
+
+        <!-- AI -->
+        <div class="settings-panel" id="tab-ai">
+          <div class="settings-section">
+            <div class="settings-section-title">OpenRouter</div>
+            <p class="hint" style="margin-bottom:14px;">Optional. Generates additional business URLs alongside Bing and DuckDuckGo. All three run in parallel.</p>
+            <div class="form-row">
+              <div class="form-group" style="flex:1 1 100%;">
+                <label for="openrouter_api_key">API Key</label>
+                <input type="password" id="openrouter_api_key" name="openrouter_api_key" value="{{ settings.get('openrouter_api_key', '') }}" placeholder="sk-or-v1-...">
+                <span class="hint">Get a free key at <a href="https://openrouter.ai/keys" target="_blank" rel="noopener">openrouter.ai/keys</a>. Leave empty to disable.</span>
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-group" style="flex:1 1 100%;">
+                <label>Status</label>
+                {% if settings.get('openrouter_api_key') %}
+                <div style="padding:10px 12px; background:#D1FAE5; color:#065F46; border-radius:4px; font-size:13px;">✓ AI URL generation active.</div>
+                {% else %}
+                <div style="padding:10px 12px; background:#F3F4F6; color:#374151; border-radius:4px; font-size:13px;">Disabled — add an API key above to enable.</div>
+                {% endif %}
+              </div>
+            </div>
+            <details style="margin-top:12px;">
+              <summary style="cursor:pointer; font-size:13px; color:var(--text-muted); padding:6px 0;">Advanced ▾</summary>
+              <div class="form-row" style="margin-top:10px;">
+                <div class="form-group" style="flex:1 1 100%;">
+                  <label for="openrouter_model">AI Model</label>
+                  <select id="openrouter_model" name="openrouter_model">
+                    <option value="openrouter/free" {% if settings.get('openrouter_model', 'openrouter/free') == 'openrouter/free' %}selected{% endif %}>OpenRouter Free Router (Recommended)</option>
+                    <option value="google/gemma-4-31b-it:free" {% if settings.get('openrouter_model') == 'google/gemma-4-31b-it:free' %}selected{% endif %}>Gemma 4 31B (Free)</option>
+                    <option value="openai/gpt-oss-120b:free" {% if settings.get('openrouter_model') == 'openai/gpt-oss-120b:free' %}selected{% endif %}>GPT-OSS 120B (Free)</option>
+                    <option value="nvidia/nemotron-3-super-120b-a12b:free" {% if settings.get('openrouter_model') == 'nvidia/nemotron-3-super-120b-a12b:free' %}selected{% endif %}>Nemotron 3 Super 120B (Free)</option>
+                    <option value="openai/gpt-oss-20b:free" {% if settings.get('openrouter_model') == 'openai/gpt-oss-20b:free' %}selected{% endif %}>GPT-OSS 20B (Free)</option>
+                  </select>
+                  <span class="hint">Router handles failover automatically.</span>
+                </div>
+              </div>
+            </details>
+          </div>
+        </div>
+
+        <!-- CRAWL -->
+        <div class="settings-panel" id="tab-crawl">
+          <div class="settings-section">
+            <div class="settings-section-title">Crawler</div>
+            <div class="form-row">
+              <div class="form-group">
+                <label for="max_concurrent_requests">Parallel Crawl Connections</label>
+                <input type="number" id="max_concurrent_requests" name="max_concurrent_requests" value="{{ settings.max_concurrent_requests }}" min="1" max="100">
+                <span class="hint">Domains crawled in parallel.</span>
+              </div>
+              <div class="form-group">
+                <label for="crawl_delay">Crawl Delay (sec)</label>
+                <input type="number" id="crawl_delay" name="crawl_delay" value="{{ settings.crawl_delay }}" min="0" max="5" step="0.1">
+                <span class="hint">Wait between sub-page requests on the same domain.</span>
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-group">
+                <label for="request_timeout">Request Timeout (sec)</label>
+                <input type="number" id="request_timeout" name="request_timeout" value="{{ settings.request_timeout }}" min="3" max="60">
+              </div>
+              <div class="form-group">
+                <label for="max_pages_per_domain">Max Pages per Domain</label>
+                <input type="number" id="max_pages_per_domain" name="max_pages_per_domain" value="{{ settings.max_pages_per_domain }}" min="1" max="20">
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-group" style="flex:1 1 100%;">
+                <label for="robots_txt_mode">robots.txt Mode</label>
+                <select id="robots_txt_mode" name="robots_txt_mode">
+                  <option value="off" {% if settings.robots_txt_mode == 'off' %}selected{% endif %}>Off — Ignore robots.txt entirely</option>
+                  <option value="soft" {% if settings.get('robots_txt_mode', 'soft') == 'soft' %}selected{% endif %}>Soft — Only block admin/private paths (recommended)</option>
+                  <option value="strict" {% if settings.robots_txt_mode == 'strict' %}selected{% endif %}>Strict — Block everything robots.txt says</option>
+                </select>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- VERIFY -->
+        <div class="settings-panel" id="tab-verify">
+          <div class="settings-section">
+            <div class="settings-section-title">SMTP Identity</div>
+            {% if smtp_status %}
+            <div style="padding:10px 12px; border-radius:4px; font-size:13px; margin-bottom:14px; {% if smtp_status.level == 'success' %}background:#D1FAE5; color:#065F46;{% else %}background:#FEF3C7; color:#92400E;{% endif %}">
+              {{ smtp_status.message }}
+            </div>
+            {% endif %}
+            <div class="form-row">
+              <div class="form-group">
+                <label for="smtp_ehlo_hostname">EHLO Hostname</label>
+                <input type="text" id="smtp_ehlo_hostname" name="smtp_ehlo_hostname" value="{{ settings.get('smtp_ehlo_hostname', '') }}" placeholder="mail.yourdomain.com" autocapitalize="off" spellcheck="false">
+                <span class="hint">Stable hostname sent in EHLO/HELO. Should match the PTR/rDNS of your primary SMTP IP.</span>
+              </div>
+              <div class="form-group">
+                <label for="smtp_mail_from">MAIL FROM</label>
+                <input type="email" id="smtp_mail_from" name="smtp_mail_from" value="{{ settings.get('smtp_mail_from', '') }}" placeholder="verify@yourdomain.com" autocapitalize="off" spellcheck="false">
+                <span class="hint">Real mailbox on your domain used for SMTP probes.</span>
+              </div>
+            </div>
+          </div>
+          <div class="settings-section">
+            <div class="settings-section-title">Verifier</div>
+            <div class="form-row">
+              <div class="form-group">
+                <label for="verify_concurrency">Parallel Verifications</label>
+                <input type="number" id="verify_concurrency" name="verify_concurrency" value="{{ settings.verify_concurrency }}" min="1" max="100">
+                <span class="hint">30 is a good default.</span>
+              </div>
+              <div class="form-group">
+                <label for="verify_timeout">Verify Timeout (sec)</label>
+                <input type="number" id="verify_timeout" name="verify_timeout" value="{{ settings.verify_timeout }}" min="3" max="30">
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-group" style="flex:1 1 100%;">
+                <div style="padding:10px 12px; background:#F3F4F6; color:#374151; border-radius:4px; font-size:13px;">
+                  Verification always uses the server's primary default route. Search IP rotation does not apply here.
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        {% endif %}
+
+        <!-- SECURITY (visible to all) -->
+        <div class="settings-panel{% if not is_admin %} active{% endif %}" id="tab-security">
+          <div class="settings-section">
+            <div class="settings-section-title">Password Protection</div>
+            {% if has_password %}
+            <div class="form-row">
+              <div class="form-group">
                 <label for="current_password">Current Password</label>
                 <input type="password" id="current_password" name="current_password" placeholder="Enter current password">
                 <span class="hint">Required to change password.</span>
-            </div>
-            <div class="form-group">
+              </div>
+              <div class="form-group">
                 <label for="new_password">New Password</label>
                 <input type="password" id="new_password" name="new_password" placeholder="Leave empty to keep current">
-                <span class="hint">Leave blank to keep existing password.</span>
+              </div>
             </div>
-        </div>
-        <div class="form-row">
-            <div class="form-group">
-                <label>
-                    <input type="checkbox" name="remove_password" value="1" style="width:auto; margin-right:6px;">
-                    Remove password protection
+            {% if is_admin %}
+            <div class="form-row">
+              <div class="form-group">
+                <label style="display:inline-flex; align-items:center; gap:6px;">
+                  <input type="checkbox" name="remove_password" value="1" style="width:auto;">
+                  Remove password protection
                 </label>
                 <span class="hint">Unprotects the app — anyone with the URL can access it.</span>
+              </div>
+              <div class="form-group"></div>
             </div>
-            <div class="form-group"></div>
-        </div>
-        {% else %}
-        <div class="form-row">
-            <div class="form-group">
+            {% endif %}
+            {% else %}
+            <div class="form-row">
+              <div class="form-group">
                 <label for="new_password">Set Password</label>
                 <input type="password" id="new_password" name="new_password" placeholder="Enter a password to protect the app">
                 <span class="hint">Optional. Protects the app with a login screen.</span>
+              </div>
+              <div class="form-group"></div>
             </div>
-            <div class="form-group"></div>
+            {% endif %}
+          </div>
         </div>
-        {% endif %}
-    </div>
+      </form>
 
-    {% if is_admin %}
-    <div class="settings-panel" id="tab-logs">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
-            <h2 style="margin: 0; border: none; padding: 0;">Server Logs</h2>
-            <div class="header-actions" style="display: flex; gap: 10px; align-items: center;">
-                <button type="button" class="btn btn-secondary btn-sm" onclick="refreshLogs()">Refresh</button>
-                <label style="display: inline-flex; align-items: center; gap: 6px; font-size: 0.85rem; margin: 0;">
-                    <input type="checkbox" id="auto-refresh" style="width: auto; margin:0;" checked> Auto-refresh
-                </label>
-                <select id="log-lines" style="width: auto; padding: 4px 8px; font-size: 0.85rem;">
-                    <option value="50">50 lines</option>
-                    <option value="100" selected>100 lines</option>
-                    <option value="200">200 lines</option>
-                    <option value="500">500 lines</option>
-                </select>
-            </div>
-        </div>
-        <div id="log-meta" class="hint" style="margin-bottom: 8px;"></div>
-        <div id="log-container" style="background: var(--bg); border: 1px solid var(--border); border-radius: 4px; padding: 16px; min-height: 400px; max-height: 50vh; overflow-y: auto; font-family: 'Courier New', monospace; font-size: 0.8rem; line-height: 1.6; white-space: pre-wrap; word-break: break-all; color: var(--text-muted);">
-            Loading...
-        </div>
-    </div>
-    {% endif %}
-
-    <div class="form-actions" id="form-save-actions">
-        <button type="submit" class="btn btn-primary">Save Settings</button>
-    </div>
-</form>
-
-<div class="settings-panel" id="tab-license" style="max-width: 100%;">
-    <div class="form-card" style="max-width: 100%; padding: 32px; margin-top: 20px;">
-        <h2>License</h2>
-        {% if license_state and license_state.valid %}
-        <div style="background: #D1FAE5; color: #065F46; padding: 12px 14px; border-radius: 6px; font-size: 13px; margin-bottom: 18px;">
+      <!-- LICENSE (separate form, visible to all; POST handler enforces admin-only writes) -->
+      <div class="settings-panel" id="tab-license">
+        <div class="settings-section">
+          <div class="settings-section-title">License Status</div>
+          {% if license_state and license_state.valid %}
+          <div style="background:#D1FAE5; color:#065F46; padding:12px 14px; border-radius:6px; font-size:13px; margin-bottom:18px;">
             <strong>✓ Active</strong> — licensed to {{ license_state.customer or 'this install' }}.
-        </div>
-        <div class="form-row">
+          </div>
+          <div class="form-row">
             <div class="form-group">
-                <label>Customer</label>
-                <div class="readonly-value">{{ license_state.customer or '—' }}</div>
+              <label>Customer</label>
+              <div class="readonly-value">{{ license_state.customer or '—' }}</div>
             </div>
             <div class="form-group">
-                <label>Issued</label>
-                <div class="readonly-value">{{ license_state.issued_at or '—' }}</div>
+              <label>Issued</label>
+              <div class="readonly-value">{{ license_state.issued_at or '—' }}</div>
             </div>
-        </div>
-        <div class="form-row">
+          </div>
+          <div class="form-row">
             <div class="form-group">
-                <label>Expires</label>
-                <div class="readonly-value">{{ license_state.expires_at or 'Never' }}</div>
+              <label>Expires</label>
+              <div class="readonly-value">{{ license_state.expires_at or 'Never' }}</div>
             </div>
             <div class="form-group">
-                <label>Features</label>
-                <div class="readonly-value">
-                    {% if license_state.features %}{{ license_state.features | join(', ') }}{% else %}—{% endif %}
-                </div>
+              <label>Features</label>
+              <div class="readonly-value">{% if license_state.features %}{{ license_state.features | join(', ') }}{% else %}—{% endif %}</div>
             </div>
-        </div>
-        {% else %}
-        <div style="background: #FEE2E2; color: #991B1B; padding: 12px 14px; border-radius: 6px; font-size: 13px; margin-bottom: 18px;">
+          </div>
+          {% else %}
+          <div style="background:#FEE2E2; color:#991B1B; padding:12px 14px; border-radius:6px; font-size:13px; margin-bottom:18px;">
             <strong>⚠ No active license</strong>{% if license_state and license_state.error %} — {{ license_state.error }}{% endif %}
-        </div>
-        {% endif %}
+          </div>
+          {% endif %}
 
-        <div class="form-row">
-            <div class="form-group" style="flex: 1 1 100%;">
-                <label>Host Fingerprint</label>
-                <div class="readonly-value" style="font-family: 'Courier New', monospace; font-size: 12px; word-break: break-all; background: #F3F4F6; padding: 10px 12px; border-radius: 4px;">
-                    {{ license_state.host_fingerprint if license_state else '' }}
-                </div>
-                <span class="hint">Send this to your vendor to request a license bound to this machine.</span>
+          <div class="form-row">
+            <div class="form-group" style="flex:1 1 100%;">
+              <label>Host Fingerprint</label>
+              <div class="readonly-value" style="font-family:'Courier New',monospace; font-size:12px; word-break:break-all; background:#F3F4F6; padding:10px 12px; border-radius:4px;">
+                {{ license_state.host_fingerprint if license_state else '' }}
+              </div>
+              <span class="hint">Send this to your vendor to request a license bound to this machine.</span>
             </div>
+          </div>
         </div>
 
-        <form method="post" action="{{ url_for('settings.update_license') }}" style="margin-top: 18px;">
+        {% if is_admin %}
+        <div class="settings-section">
+          <div class="settings-section-title">Replace License</div>
+          <form method="post" action="{{ url_for('settings.update_license') }}">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <div class="form-row">
-                <div class="form-group" style="flex: 1 1 100%;">
-                    <label for="license">Replace License Key</label>
-                    <textarea id="license" name="license" rows="5" placeholder="Paste the single-line license key you received from your vendor..." style="width: 100%; padding: 12px; border: 1px solid #E5E7EB; border-radius: 4px; font-family: 'Courier New', monospace; font-size: 12px; resize: vertical;"></textarea>
-                    <span class="hint">Pasting a new key replaces the existing license file.</span>
-                </div>
+              <div class="form-group" style="flex:1 1 100%;">
+                <label for="license">License Key</label>
+                <textarea id="license" name="license" rows="5" placeholder="Paste the single-line license key you received from your vendor..." style="width:100%; padding:12px; border:1px solid #E5E7EB; border-radius:4px; font-family:'Courier New',monospace; font-size:12px; resize:vertical;"></textarea>
+                <span class="hint">Pasting a new key replaces the existing license file.</span>
+              </div>
             </div>
-            <div class="form-actions">
-                <button type="submit" class="btn btn-primary">Install License</button>
+            <div style="display:flex; justify-content:flex-end;">
+              <button type="submit" class="btn btn-primary">Install License</button>
             </div>
-        </form>
+          </form>
+        </div>
+        {% endif %}
+      </div>
+
+      {% if is_admin %}
+      <!-- LOGS -->
+      <div class="settings-panel" id="tab-logs">
+        <div class="settings-section">
+          <div class="settings-section-title" style="display:flex; justify-content:space-between; align-items:center;">
+            <span>Server Logs</span>
+            <div style="display:flex; gap:10px; align-items:center;">
+              <button type="button" class="btn btn-secondary btn-sm" onclick="refreshLogs()">Refresh</button>
+              <label style="display:inline-flex; align-items:center; gap:6px; font-size:.85rem; margin:0; text-transform:none; letter-spacing:0; color:var(--text);">
+                <input type="checkbox" id="auto-refresh" style="width:auto; margin:0;" checked> Auto-refresh
+              </label>
+              <select id="log-lines" style="width:auto; padding:4px 8px; font-size:.85rem;">
+                <option value="50">50 lines</option>
+                <option value="100" selected>100 lines</option>
+                <option value="200">200 lines</option>
+                <option value="500">500 lines</option>
+              </select>
+            </div>
+          </div>
+          <div id="log-meta" class="hint" style="margin-bottom:8px;"></div>
+          <div id="log-container" style="background:var(--bg); border:1px solid var(--border); border-radius:4px; padding:16px; min-height:400px; max-height:50vh; overflow-y:auto; font-family:'Courier New',monospace; font-size:.8rem; line-height:1.6; white-space:pre-wrap; word-break:break-all; color:var(--text-muted);">
+            Loading...
+          </div>
+        </div>
+      </div>
+      {% endif %}
+
     </div>
+
+    <div class="settings-pane-footer" id="form-save-actions">
+      <button type="submit" class="btn btn-primary" form="main-settings-form">Save changes</button>
+    </div>
+  </section>
+
+</div>
 </div>
 
 {% endblock %}
@@ -421,30 +475,58 @@
 <script>
 let autoRefreshTimer = null;
 
+const paneTitles = {
+    search:  { title: 'Search Engines',      hint: 'Concurrency, delays, and results per page for Bing & DuckDuckGo.' },
+    ips:     { title: 'IP Rotation',         hint: 'Outbound IP pool. Rotated round-robin with cooldowns.' },
+    ai:      { title: 'AI (OpenRouter)',     hint: 'OpenRouter API key & model for AI URL generation.' },
+    crawl:   { title: 'Crawl',               hint: 'HTTP crawl behavior and robots.txt policy.' },
+    verify:  { title: 'SMTP & Rules',        hint: 'SMTP identity and verifier concurrency.' },
+    security:{ title: 'Password Protection', hint: 'Manage the login password for this install.' },
+    license: { title: 'License',             hint: 'License status, replacement, and host fingerprint.' },
+    logs:    { title: 'Server Logs',         hint: 'Live tail of the GraphenMail service.' },
+};
+
 document.querySelectorAll('.settings-tab').forEach(tab => {
-    tab.addEventListener('click', () => {
+    tab.addEventListener('click', (e) => {
+        e.preventDefault();
         document.querySelectorAll('.settings-tab').forEach(t => t.classList.remove('active'));
         document.querySelectorAll('.settings-panel').forEach(p => p.classList.remove('active'));
         tab.classList.add('active');
-        document.getElementById('tab-' + tab.dataset.tab).classList.add('active');
+        const key = tab.dataset.tab;
+        const panel = document.getElementById('tab-' + key);
+        if (panel) panel.classList.add('active');
+
+        const meta = paneTitles[key];
+        if (meta) {
+            document.getElementById('pane-title').textContent = meta.title;
+            document.getElementById('pane-hint').textContent = meta.hint;
+        }
 
         const saveActions = document.getElementById('form-save-actions');
-        if (saveActions) saveActions.style.display = (tab.dataset.tab === 'logs' || tab.dataset.tab === 'license') ? 'none' : '';
+        if (saveActions) saveActions.style.display = (key === 'logs' || key === 'license') ? 'none' : '';
 
-        if(tab.dataset.tab === 'logs') {
+        if (key === 'logs') {
             refreshLogs();
             toggleAutoRefresh();
-        } else {
-            if (autoRefreshTimer) {
-                clearInterval(autoRefreshTimer);
-                autoRefreshTimer = null;
-            }
+        } else if (autoRefreshTimer) {
+            clearInterval(autoRefreshTimer);
+            autoRefreshTimer = null;
         }
+    });
+});
+
+// Search filter across rail labels
+document.getElementById('settings-search')?.addEventListener('input', (e) => {
+    const q = e.target.value.trim().toLowerCase();
+    document.querySelectorAll('.settings-rail .settings-tab').forEach(a => {
+        const text = a.textContent.toLowerCase();
+        a.style.display = !q || text.includes(q) ? '' : 'none';
     });
 });
 
 async function refreshIpStatus() {
     const msg = document.getElementById('ip-refresh-msg');
+    if (!msg) return;
     msg.textContent = 'Checking...';
     try {
         const res = await fetch('/api/ip-status');
@@ -460,15 +542,13 @@ async function refreshIpStatus() {
     }
 }
 
-// LOGS logic
 async function refreshLogs() {
-    const lines = document.getElementById('log-lines').value;
+    const linesEl = document.getElementById('log-lines');
     const container = document.getElementById('log-container');
     const meta = document.getElementById('log-meta');
-    if(!container) return;
-
+    if (!container || !linesEl) return;
     try {
-        const res = await fetch(`/api/logs?lines=${lines}`);
+        const res = await fetch(`/api/logs?lines=${linesEl.value}`);
         const data = await res.json();
         if (data.error) {
             container.textContent = `Error: ${data.error}`;
@@ -476,19 +556,15 @@ async function refreshLogs() {
             return;
         }
         meta.textContent = `Source: ${data.file} | Showing ${data.showing} of ${data.total_lines} lines`;
-        const wasScrolledToBottom = container.scrollHeight - container.clientHeight <= container.scrollTop + 50;
-
+        const wasBottom = container.scrollHeight - container.clientHeight <= container.scrollTop + 50;
         container.innerHTML = data.lines.map(line => {
             let cls = '';
             if (line.includes('ERROR') || line.includes('error')) cls = 'log-error';
             else if (line.includes('WARNING') || line.includes('warning')) cls = 'log-warn';
-            else if (line.includes('INFO') || line.includes('via IP') || line.includes('OpenRouter')) cls = 'log-info';
+            else if (line.includes('INFO')) cls = 'log-info';
             return `<span class="${cls}">${escapeHtml(line)}</span>`;
         }).join('\n');
-
-        if (wasScrolledToBottom) {
-            container.scrollTop = container.scrollHeight;
-        }
+        if (wasBottom) container.scrollTop = container.scrollHeight;
     } catch (e) {
         container.textContent = `Failed to fetch logs: ${e.message}`;
     }
@@ -501,12 +577,10 @@ function escapeHtml(text) {
 }
 
 function toggleAutoRefresh() {
-    if (autoRefreshTimer) {
-        clearInterval(autoRefreshTimer);
-        autoRefreshTimer = null;
-    }
-    const autoRefreshCb = document.getElementById('auto-refresh');
-    if (autoRefreshCb && autoRefreshCb.checked && document.getElementById('tab-logs').classList.contains('active')) {
+    if (autoRefreshTimer) { clearInterval(autoRefreshTimer); autoRefreshTimer = null; }
+    const cb = document.getElementById('auto-refresh');
+    const logsPanel = document.getElementById('tab-logs');
+    if (cb && cb.checked && logsPanel && logsPanel.classList.contains('active')) {
         autoRefreshTimer = setInterval(refreshLogs, 5000);
     }
 }

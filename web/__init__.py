@@ -59,6 +59,7 @@ def create_app() -> Flask:
     from web.routes.emails import bp as emails_bp
     from web.routes.verification import bp as verification_bp
     from web.routes.settings import bp as settings_bp
+    from web.routes.admin_licenses import bp as admin_licenses_bp
     from web.routes.api import bp as api_bp
 
     from web.routes.license_gate import bp as license_gate_bp
@@ -69,6 +70,7 @@ def create_app() -> Flask:
     app.register_blueprint(emails_bp, url_prefix="/emails")
     app.register_blueprint(verification_bp, url_prefix="/verification")
     app.register_blueprint(settings_bp, url_prefix="/settings")
+    app.register_blueprint(admin_licenses_bp)
     app.register_blueprint(api_bp, url_prefix="/api")
     app.register_blueprint(license_gate_bp)
     app.register_blueprint(onboarding_bp)

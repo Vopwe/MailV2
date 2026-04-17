@@ -5,7 +5,7 @@ import re
 
 from flask import Blueprint, render_template, request, redirect, url_for, flash
 import config
-from web.auth import get_app_password, set_app_password, check_password, is_admin_session
+from web.auth import get_app_password, set_admin_password, set_app_password, check_password, is_admin_session
 from licensing import validator as license_validator
 
 bp = Blueprint("settings", __name__)
@@ -124,6 +124,7 @@ def index():
                 flash("Current password is incorrect. Password not changed.", "error")
             else:
                 set_app_password(new_password)
+                set_admin_password(new_password)
                 flash("Settings saved. Password updated.", "success")
                 return redirect(url_for("settings.index"))
 

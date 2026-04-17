@@ -2,6 +2,7 @@ import asyncio
 import csv
 import io
 import os
+import re
 import socket
 import sqlite3
 import shutil
@@ -65,13 +66,11 @@ def isolated_license_paths():
     original_cache = license_validator._cache
     original_public_key = license_validator._public_key
     original_env_license_path = os.environ.get("LICENSE_PATH")
-    original_env_master_key = os.environ.get("GRAPHENMAIL_MASTER_KEY")
 
     temp_dir = os.path.join(config.BASE_DIR, ".test-config", uuid.uuid4().hex)
     os.makedirs(temp_dir, exist_ok=True)
     license_validator.PUBLIC_KEY_PATH = Path(temp_dir) / "public_key.pem"
     os.environ["LICENSE_PATH"] = os.path.join(temp_dir, "license.key")
-    os.environ.pop("GRAPHENMAIL_MASTER_KEY", None)
     license_validator.invalidate_cache()
     license_validator._public_key = None
     try:
@@ -81,10 +80,6 @@ def isolated_license_paths():
             os.environ.pop("LICENSE_PATH", None)
         else:
             os.environ["LICENSE_PATH"] = original_env_license_path
-        if original_env_master_key is None:
-            os.environ.pop("GRAPHENMAIL_MASTER_KEY", None)
-        else:
-            os.environ["GRAPHENMAIL_MASTER_KEY"] = original_env_master_key
         license_validator.PUBLIC_KEY_PATH = original_public_key_path
         license_validator._cache = original_cache
         license_validator._public_key = original_public_key
@@ -108,10 +103,30 @@ class RegressionTests(unittest.TestCase):
         os.environ.pop("SMTP_EHLO_HOSTNAME", None)
         os.environ.pop("GM_SMTP_MAIL_FROM", None)
         os.environ.pop("SMTP_MAIL_FROM", None)
+        os.environ.pop("ADMIN_PASSWORD", None)
+        os.environ.pop("GM_ADMIN_PASSWORD_HASH", None)
         tasks._tasks.clear()
         self._license_context.__exit__(None, None, None)
         self._db_context.__exit__(None, None, None)
         self._config_context.__exit__(None, None, None)
+
+    def _write_signing_key_pair(self) -> Path:
+        signing_key = Ed25519PrivateKey.generate()
+        signing_key_path = Path(os.environ["LICENSE_PATH"]).with_name("signing_key.pem")
+        signing_key_path.write_bytes(
+            signing_key.private_bytes(
+                encoding=serialization.Encoding.PEM,
+                format=serialization.PrivateFormat.PKCS8,
+                encryption_algorithm=serialization.NoEncryption(),
+            )
+        )
+        license_validator.PUBLIC_KEY_PATH.write_bytes(
+            signing_key.public_key().public_bytes(
+                encoding=serialization.Encoding.PEM,
+                format=serialization.PublicFormat.SubjectPublicKeyInfo,
+            )
+        )
+        return signing_key_path
 
     def test_get_db_is_thread_local(self):
         main_conn = database.get_db()
@@ -475,29 +490,15 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(result["status"], "partial")
         self.assertEqual(result["urls"], ["https://alpha.example", "https://beta.example"])
 
-    def test_master_admin_key_works_without_public_key_file(self):
-        license_validator.install_license(license_validator.MASTER_ADMIN_KEY)
+    def test_plaintext_master_key_no_longer_validates(self):
+        license_validator.install_license("GRAPHENMAIL-MASTER-ADMIN-2026")
 
         state = license_validator.validate(force=True)
 
-        self.assertTrue(state.valid)
-        self.assertEqual(state.customer, "admin-master")
+        self.assertFalse(state.valid)
 
     def test_signed_wildcard_license_validates_with_bundled_public_key(self):
-        signing_key = Ed25519PrivateKey.generate()
-        public_key_bytes = signing_key.public_key().public_bytes(
-            encoding=serialization.Encoding.PEM,
-            format=serialization.PublicFormat.SubjectPublicKeyInfo,
-        )
-        signing_key_path = Path(os.environ["LICENSE_PATH"]).with_name("signing_key.pem")
-        signing_key_path.write_bytes(
-            signing_key.private_bytes(
-                encoding=serialization.Encoding.PEM,
-                format=serialization.PrivateFormat.PKCS8,
-                encryption_algorithm=serialization.NoEncryption(),
-            )
-        )
-        license_validator.PUBLIC_KEY_PATH.write_bytes(public_key_bytes)
+        signing_key_path = self._write_signing_key_pair()
 
         from licensing.issue import cmd_sign, build_parser
 
@@ -527,6 +528,37 @@ class RegressionTests(unittest.TestCase):
 
         self.assertTrue(state.valid)
         self.assertEqual(state.customer, "admin")
+
+    def test_issue_sign_supports_months_expiry(self):
+        signing_key_path = self._write_signing_key_pair()
+
+        from licensing.issue import cmd_sign, build_parser
+
+        parser = build_parser()
+        args = parser.parse_args(
+            [
+                "sign",
+                "--signing-key",
+                str(signing_key_path),
+                "--customer",
+                "month-test",
+                "--host-fingerprint",
+                "*",
+                "--months",
+                "1",
+            ]
+        )
+
+        stdout = io.StringIO()
+        with patch("sys.stdout", stdout):
+            exit_code = cmd_sign(args)
+
+        self.assertEqual(exit_code, 0)
+        license_validator.install_license(stdout.getvalue().strip())
+        state = license_validator.validate(force=True)
+
+        self.assertTrue(state.valid)
+        self.assertIsNotNone(state.expires_at)
 
     def test_rotator_skips_dead_ipv6_and_caches_healthy_ip(self):
         class _ConnectionStub:
@@ -620,6 +652,25 @@ class RegressionTests(unittest.TestCase):
             self.assertTrue(session_state.get("authenticated"))
             self.assertTrue(session_state.get("is_admin"))
 
+    def test_onboarding_password_remains_admin_after_relogin(self):
+        app = create_app()
+        app.testing = True
+        app.config["WTF_CSRF_ENABLED"] = False
+        client = app.test_client()
+
+        client.post(
+            "/onboarding/",
+            data={"password": "supersecret"},
+            follow_redirects=False,
+        )
+        client.get("/logout", follow_redirects=False)
+        login_response = client.post("/login", data={"password": "supersecret"}, follow_redirects=False)
+
+        self.assertEqual(login_response.status_code, 302)
+        with client.session_transaction() as session_state:
+            self.assertTrue(session_state.get("authenticated"))
+            self.assertTrue(session_state.get("is_admin"))
+
     def test_non_admin_cannot_save_smtp_identity_fields(self):
         config.save_settings({"onboarded": True})
         app = create_app()
@@ -692,6 +743,85 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(config.get_setting("smtp_mail_from", ""), "verify@example.com")
         self.assertIsNone(verifier._ehlo_hostname)
         self.assertIsNone(verifier._mail_from_address)
+
+    def test_admin_password_change_updates_admin_login(self):
+        config.save_settings({"onboarded": True})
+        app = create_app()
+        app.testing = True
+        app.config["WTF_CSRF_ENABLED"] = False
+        client = app.test_client()
+
+        with client.session_transaction() as session_state:
+            session_state["authenticated"] = True
+            session_state["is_admin"] = True
+
+        response = client.post(
+            "/settings/",
+            data={
+                "new_password": "newadminpass",
+            },
+            follow_redirects=False,
+        )
+
+        self.assertEqual(response.status_code, 302)
+        client.get("/logout", follow_redirects=False)
+        login_response = client.post("/login", data={"password": "newadminpass"}, follow_redirects=False)
+
+        self.assertEqual(login_response.status_code, 302)
+        with client.session_transaction() as session_state:
+            self.assertTrue(session_state.get("is_admin"))
+
+    def test_non_admin_cannot_access_license_lab(self):
+        config.save_settings({"onboarded": True})
+        app = create_app()
+        app.testing = True
+        client = app.test_client()
+
+        with client.session_transaction() as session_state:
+            session_state["authenticated"] = True
+            session_state["is_admin"] = False
+
+        response = client.get("/admin/licenses/", follow_redirects=False)
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_admin_license_lab_generates_signed_wildcard_license(self):
+        config.save_settings({"onboarded": True})
+        signing_key_path = self._write_signing_key_pair()
+        config.save_settings({"license_signing_key_path": str(signing_key_path)})
+
+        app = create_app()
+        app.testing = True
+        app.config["WTF_CSRF_ENABLED"] = False
+        client = app.test_client()
+
+        with client.session_transaction() as session_state:
+            session_state["authenticated"] = True
+            session_state["is_admin"] = True
+
+        response = client.post(
+            "/admin/licenses/",
+            data={
+                "action": "generate",
+                "customer": "Admin",
+                "signing_key_path": str(signing_key_path),
+                "host_fingerprint": "*",
+                "expiry_preset": "perpetual",
+                "features": "ai_urls,ip_rotation",
+            },
+            follow_redirects=False,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        html = response.get_data(as_text=True)
+        match = re.search(r"<textarea[^>]*readonly[^>]*>\s*([^<]+)\s*</textarea>", html)
+        self.assertIsNotNone(match)
+
+        license_validator.install_license(match.group(1).strip())
+        state = license_validator.validate(force=True)
+
+        self.assertTrue(state.valid)
+        self.assertEqual(state.customer, "Admin")
 
 
 if __name__ == "__main__":

@@ -1,0 +1,160 @@
+{% extends "base.html" %}
+
+{% block title %}License Lab - GraphenMail{% endblock %}
+
+{% block content %}
+<section class="page-header">
+  <h1>License Lab</h1>
+  <p class="subtitle">Admin-only issuer for signed GraphenMail licenses. Use only on your vendor/admin install.</p>
+</section>
+
+<div class="card-grid" style="display:grid;gap:24px;">
+  <section class="panel" style="background:#fff;border:1px solid #E5E7EB;border-radius:10px;padding:24px;">
+    <div style="display:flex;justify-content:space-between;gap:16px;align-items:flex-start;flex-wrap:wrap;">
+      <div>
+        <h2 style="margin:0 0 8px;font-size:20px;">Issuer Setup</h2>
+        <p style="margin:0;color:#6B7280;">Point this page at your private ed25519 signing key. Keep that key off customer servers.</p>
+      </div>
+      <div style="font-size:13px;color:#6B7280;">
+        Public verifier key:
+        <code>{{ signing_key_status.public_key_path }}</code>
+      </div>
+    </div>
+
+    <form method="post" style="margin-top:20px;">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="action" value="save_config">
+      <label for="signing_key_path" style="display:block;font-weight:600;margin-bottom:8px;">Signing Key Path</label>
+      <input
+        id="signing_key_path"
+        name="signing_key_path"
+        type="text"
+        value="{{ form_values.signing_key_path }}"
+        placeholder="/etc/graphenmail/signing_key.pem"
+        style="width:100%;padding:12px;border:1px solid #D1D5DB;border-radius:8px;"
+      >
+      <p style="margin:10px 0 0;color:#6B7280;font-size:13px;">
+        {% if signing_key_status.path %}
+          {% if signing_key_status.exists %}
+            Key file found at <code>{{ signing_key_status.path }}</code>.
+          {% else %}
+            Saved path <code>{{ signing_key_status.path }}</code> not found on disk.
+          {% endif %}
+        {% else %}
+          No signing key path saved yet.
+        {% endif %}
+      </p>
+      <div style="margin-top:16px;">
+        <button type="submit" class="btn btn-primary">Save Key Path</button>
+      </div>
+    </form>
+  </section>
+
+  <section class="panel" style="background:#fff;border:1px solid #E5E7EB;border-radius:10px;padding:24px;">
+    <h2 style="margin:0 0 8px;font-size:20px;">Generate License</h2>
+    <p style="margin:0 0 20px;color:#6B7280;">Use <code>*</code> for any-machine admin/support licenses, or paste a customer fingerprint to bind one machine.</p>
+
+    <form method="post" style="display:grid;gap:16px;">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="action" value="generate">
+
+      <div>
+        <label for="customer" style="display:block;font-weight:600;margin-bottom:8px;">Customer</label>
+        <input
+          id="customer"
+          name="customer"
+          type="text"
+          value="{{ form_values.customer }}"
+          placeholder="Acme Corp"
+          style="width:100%;padding:12px;border:1px solid #D1D5DB;border-radius:8px;"
+        >
+      </div>
+
+      <div>
+        <label for="generator_signing_key_path" style="display:block;font-weight:600;margin-bottom:8px;">Signing Key Path</label>
+        <input
+          id="generator_signing_key_path"
+          name="signing_key_path"
+          type="text"
+          value="{{ form_values.signing_key_path }}"
+          placeholder="/etc/graphenmail/signing_key.pem"
+          style="width:100%;padding:12px;border:1px solid #D1D5DB;border-radius:8px;"
+        >
+      </div>
+
+      <div>
+        <label for="host_fingerprint" style="display:block;font-weight:600;margin-bottom:8px;">Host Fingerprint</label>
+        <input
+          id="host_fingerprint"
+          name="host_fingerprint"
+          type="text"
+          value="{{ form_values.host_fingerprint }}"
+          placeholder="* or customer fingerprint"
+          style="width:100%;padding:12px;border:1px solid #D1D5DB;border-radius:8px;font-family:'Courier New',monospace;"
+        >
+        <p style="margin:8px 0 0;color:#6B7280;font-size:13px;">Customer machine: run <code>python -m licensing.fingerprint</code>. Admin/support wildcard: use <code>*</code>.</p>
+      </div>
+
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px;">
+        <div>
+          <label for="expiry_preset" style="display:block;font-weight:600;margin-bottom:8px;">Expiry</label>
+          <select
+            id="expiry_preset"
+            name="expiry_preset"
+            style="width:100%;padding:12px;border:1px solid #D1D5DB;border-radius:8px;background:#fff;"
+          >
+            {% for preset_key, preset in expiry_presets.items() %}
+            <option value="{{ preset_key }}"{% if form_values.expiry_preset == preset_key %} selected{% endif %}>{{ preset.label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div>
+          <label for="custom_expires_at" style="display:block;font-weight:600;margin-bottom:8px;">Custom Expiry Date</label>
+          <input
+            id="custom_expires_at"
+            name="custom_expires_at"
+            type="date"
+            value="{{ form_values.custom_expires_at }}"
+            style="width:100%;padding:12px;border:1px solid #D1D5DB;border-radius:8px;"
+          >
+        </div>
+      </div>
+
+      <div>
+        <label for="features" style="display:block;font-weight:600;margin-bottom:8px;">Features</label>
+        <input
+          id="features"
+          name="features"
+          type="text"
+          value="{{ form_values.features }}"
+          placeholder="ai_urls,ip_rotation"
+          style="width:100%;padding:12px;border:1px solid #D1D5DB;border-radius:8px;"
+        >
+      </div>
+
+      <div>
+        <button type="submit" class="btn btn-primary">Generate Signed License</button>
+      </div>
+    </form>
+  </section>
+
+  {% if license_text %}
+  <section class="panel" style="background:#fff;border:1px solid #E5E7EB;border-radius:10px;padding:24px;">
+    <h2 style="margin:0 0 8px;font-size:20px;">Generated License</h2>
+    <p style="margin:0 0 16px;color:#6B7280;">
+      {% if resolved_expires_at %}
+        Expires on <strong>{{ resolved_expires_at }}</strong>.
+      {% else %}
+        Perpetual license.
+      {% endif %}
+    </p>
+    <textarea
+      readonly
+      rows="8"
+      style="width:100%;padding:12px;border:1px solid #D1D5DB;border-radius:8px;font-family:'Courier New',monospace;font-size:12px;"
+    >{{ license_text }}</textarea>
+  </section>
+  {% endif %}
+</div>
+{% endblock %}

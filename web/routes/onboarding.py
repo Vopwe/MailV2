@@ -5,7 +5,7 @@ configured before they land on the dashboard.
 from flask import Blueprint, flash, redirect, render_template_string, request, session, url_for
 
 import config
-from web.auth import get_app_password, set_app_password
+from web.auth import get_app_password, set_admin_password, set_app_password
 
 bp = Blueprint("onboarding", __name__, url_prefix="/onboarding")
 
@@ -79,6 +79,7 @@ def step1():
             error = "Password must be at least 6 characters."
         else:
             set_app_password(pw)
+            set_admin_password(pw)
             session["authenticated"] = True
             session["is_admin"] = True
             return redirect(url_for("onboarding.step2"))

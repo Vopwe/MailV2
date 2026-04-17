@@ -113,6 +113,8 @@ def _load_settings() -> dict:
 # Sensitive settings that should prefer env vars over settings.json.
 # Env var name is GM_<KEY_UPPER>. Useful for container / systemd EnvironmentFile deploys.
 _ENV_OVERRIDABLE_KEYS = {
+    "admin_password_hash",
+    "license_signing_key_path",
     "openrouter_api_key",
     "app_password_hash",
 }
