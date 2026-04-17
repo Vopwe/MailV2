@@ -7,6 +7,7 @@ import shutil
 import threading
 import unittest
 from contextlib import contextmanager
+from pathlib import Path
 from unittest.mock import AsyncMock, patch
 import uuid
 
@@ -14,6 +15,9 @@ import config
 import database
 import logging_setup
 import tasks
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+from licensing import validator as license_validator
 from search.ai_generator import generate_ai_urls_with_meta
 from verification import verifier
 from web import create_app
@@ -52,16 +56,53 @@ def isolated_config_paths():
         shutil.rmtree(temp_dir, ignore_errors=True)
 
 
+@contextmanager
+def isolated_license_paths():
+    original_public_key_path = license_validator.PUBLIC_KEY_PATH
+    original_cache = license_validator._cache
+    original_public_key = license_validator._public_key
+    original_env_license_path = os.environ.get("LICENSE_PATH")
+    original_env_master_key = os.environ.get("GRAPHENMAIL_MASTER_KEY")
+
+    temp_dir = os.path.join(config.BASE_DIR, ".test-config", uuid.uuid4().hex)
+    os.makedirs(temp_dir, exist_ok=True)
+    license_validator.PUBLIC_KEY_PATH = Path(temp_dir) / "public_key.pem"
+    os.environ["LICENSE_PATH"] = os.path.join(temp_dir, "license.key")
+    os.environ.pop("GRAPHENMAIL_MASTER_KEY", None)
+    license_validator.invalidate_cache()
+    license_validator._public_key = None
+    try:
+        yield temp_dir
+    finally:
+        if original_env_license_path is None:
+            os.environ.pop("LICENSE_PATH", None)
+        else:
+            os.environ["LICENSE_PATH"] = original_env_license_path
+        if original_env_master_key is None:
+            os.environ.pop("GRAPHENMAIL_MASTER_KEY", None)
+        else:
+            os.environ["GRAPHENMAIL_MASTER_KEY"] = original_env_master_key
+        license_validator.PUBLIC_KEY_PATH = original_public_key_path
+        license_validator._cache = original_cache
+        license_validator._public_key = original_public_key
+        shutil.rmtree(temp_dir, ignore_errors=True)
+
+
 class RegressionTests(unittest.TestCase):
     def setUp(self):
         self._config_context = isolated_config_paths()
         self._config_context.__enter__()
         self._db_context = isolated_db()
         self._db_context.__enter__()
+        self._license_context = isolated_license_paths()
+        self._license_context.__enter__()
         tasks._tasks.clear()
+        os.environ["GM_SKIP_LICENSE"] = "1"
 
     def tearDown(self):
+        os.environ.pop("GM_SKIP_LICENSE", None)
         tasks._tasks.clear()
+        self._license_context.__exit__(None, None, None)
         self._db_context.__exit__(None, None, None)
         self._config_context.__exit__(None, None, None)
 
@@ -426,6 +467,59 @@ class RegressionTests(unittest.TestCase):
 
         self.assertEqual(result["status"], "partial")
         self.assertEqual(result["urls"], ["https://alpha.example", "https://beta.example"])
+
+    def test_master_admin_key_works_without_public_key_file(self):
+        license_validator.install_license(license_validator.MASTER_ADMIN_KEY)
+
+        state = license_validator.validate(force=True)
+
+        self.assertTrue(state.valid)
+        self.assertEqual(state.customer, "admin-master")
+
+    def test_signed_wildcard_license_validates_with_bundled_public_key(self):
+        signing_key = Ed25519PrivateKey.generate()
+        public_key_bytes = signing_key.public_key().public_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PublicFormat.SubjectPublicKeyInfo,
+        )
+        signing_key_path = Path(os.environ["LICENSE_PATH"]).with_name("signing_key.pem")
+        signing_key_path.write_bytes(
+            signing_key.private_bytes(
+                encoding=serialization.Encoding.PEM,
+                format=serialization.PrivateFormat.PKCS8,
+                encryption_algorithm=serialization.NoEncryption(),
+            )
+        )
+        license_validator.PUBLIC_KEY_PATH.write_bytes(public_key_bytes)
+
+        from licensing.issue import cmd_sign, build_parser
+
+        parser = build_parser()
+        args = parser.parse_args(
+            [
+                "sign",
+                "--signing-key",
+                str(signing_key_path),
+                "--customer",
+                "admin",
+                "--host-fingerprint",
+                "*",
+                "--features",
+                "ai_urls,ip_rotation",
+            ]
+        )
+
+        stdout = io.StringIO()
+        with patch("sys.stdout", stdout):
+            exit_code = cmd_sign(args)
+
+        self.assertEqual(exit_code, 0)
+        license_validator.install_license(stdout.getvalue().strip())
+
+        state = license_validator.validate(force=True)
+
+        self.assertTrue(state.valid)
+        self.assertEqual(state.customer, "admin")
 
 
 if __name__ == "__main__":

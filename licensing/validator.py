@@ -165,6 +165,13 @@ def install_license(text: str) -> None:
 _CACHE_TTL = 600  # 10 minutes
 _cache: tuple[float, LicenseState] | None = None
 
+# ─── Master admin key ─────────────────────────────────────────────────
+# Plaintext bypass key for the product owner. If the license file
+# contains exactly this string (or the env var is set to it), the
+# validator short-circuits to a valid perpetual all-features state.
+# Not tied to a machine — works on every install.
+MASTER_ADMIN_KEY = "GRAPHENMAIL-MASTER-ADMIN-2026"
+
 
 def _cached_state() -> LicenseState | None:
     global _cache
@@ -203,6 +210,18 @@ def validate(force: bool = False) -> LicenseState:
 
 
 def _do_validate(fp: str) -> LicenseState:
+    raw = load_license()
+    env_key = os.getenv("GRAPHENMAIL_MASTER_KEY", "").strip()
+    if env_key == MASTER_ADMIN_KEY or (raw and raw.strip() == MASTER_ADMIN_KEY):
+        return LicenseState(
+            valid=True,
+            host_fingerprint=fp,
+            customer="admin-master",
+            issued_at=date.today().isoformat(),
+            expires_at=None,
+            features=("ai_urls", "ip_rotation"),
+        )
+
     pub_key = _load_public_key()
     if pub_key is None:
         return LicenseState(
@@ -214,7 +233,6 @@ def _do_validate(fp: str) -> LicenseState:
             ),
         )
 
-    raw = load_license()
     if not raw:
         return LicenseState(
             valid=False,
@@ -270,7 +288,11 @@ def _do_validate(fp: str) -> LicenseState:
     expires_at = payload.get("expires_at")
     features = tuple(payload.get("features", []) or [])
 
-    if host_fp_claim != fp:
+    # Wildcard "*" is an admin/master key — binds to no specific machine.
+    # Vendor-only: only issue these to yourself for support/demo.
+    if host_fp_claim == "*":
+        pass
+    elif host_fp_claim != fp:
         return LicenseState(
             valid=False,
             host_fingerprint=fp,
