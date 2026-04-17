@@ -43,6 +43,7 @@
 
     <div class="verify-actions">
         <form method="post" class="verify-action-row" id="verify-form">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <input type="hidden" name="action" value="verify_campaign" id="verify-action-field">
             <select name="campaign_id" id="verify-campaign-select">
                 <option value="">All campaigns</option>

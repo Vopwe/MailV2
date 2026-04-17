@@ -104,6 +104,20 @@ def run(campaign_id):
     return redirect(url_for("campaigns.detail", campaign_id=campaign_id, campaign_task=task_id))
 
 
+@bp.route("/<int:campaign_id>/cancel", methods=["POST"])
+def cancel(campaign_id):
+    current = tasks.find_latest_task(
+        task_type="campaign",
+        campaign_id=campaign_id,
+        statuses=("running",),
+    )
+    if current and tasks.cancel_task(current.task_id):
+        flash("Cancellation requested. Campaign will stop at the next safe point.", "success")
+    else:
+        flash("No running campaign task to cancel.", "warning")
+    return redirect(url_for("campaigns.detail", campaign_id=campaign_id))
+
+
 @bp.route("/<int:campaign_id>/delete", methods=["POST"])
 def delete(campaign_id):
     database.delete_campaign(campaign_id)

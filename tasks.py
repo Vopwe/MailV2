@@ -14,13 +14,14 @@ class TaskStatus:
     task_id: str
     task_type: str = ""
     campaign_id: int | None = None
-    status: str = "running"   # running | completed | failed
+    status: str = "running"   # running | completed | failed | cancelled
     progress: int = 0
     total: int = 0
     message: str = ""
     error: str = ""
     started_at: str = ""
     completed_at: str = ""
+    cancel_requested: bool = False
 
     def to_dict(self) -> dict:
         return {
@@ -35,6 +36,7 @@ class TaskStatus:
             "percent": round((self.progress / self.total * 100) if self.total > 0 else 0),
             "started_at": self.started_at,
             "completed_at": self.completed_at,
+            "cancel_requested": self.cancel_requested,
         }
 
 
@@ -156,6 +158,33 @@ def complete_task(task_id: str, message: str = "Done"):
         task = _tasks.get(task_id)
         if task:
             task.status = "completed"
+            task.message = message
+            task.completed_at = datetime.now().isoformat()
+    if task:
+        _persist(task)
+
+
+def cancel_task(task_id: str) -> bool:
+    """Flag a task for cancellation. Runner checks `is_cancelled()` at loop boundaries."""
+    with _lock:
+        task = _tasks.get(task_id)
+        if task and task.status == "running":
+            task.cancel_requested = True
+            _persist(task)
+            return True
+    return False
+
+
+def is_cancelled(task_id: str) -> bool:
+    task = _tasks.get(task_id)
+    return bool(task and task.cancel_requested)
+
+
+def mark_cancelled(task_id: str, message: str = "Cancelled by user"):
+    with _lock:
+        task = _tasks.get(task_id)
+        if task:
+            task.status = "cancelled"
             task.message = message
             task.completed_at = datetime.now().isoformat()
     if task:

@@ -1,11 +1,33 @@
 """
-Settings — Bing scraper config, crawl config, IP management, password.
+Settings — Bing scraper config, crawl config, IP management, password, license.
 """
 from flask import Blueprint, render_template, request, redirect, url_for, flash
 import config
 from web.auth import get_app_password, set_app_password, check_password
+from licensing import validator as license_validator
 
 bp = Blueprint("settings", __name__)
+
+
+@bp.route("/license", methods=["POST"])
+def update_license():
+    """Replace the installed license file from the Settings → License tab."""
+    raw = (request.form.get("license", "") or "").strip()
+    if not raw:
+        flash("Paste a license key to activate.", "error")
+        return redirect(url_for("settings.index") + "#tab-license")
+    try:
+        license_validator.install_license(raw)
+    except Exception as e:
+        flash(f"Could not save license: {e}", "error")
+        return redirect(url_for("settings.index") + "#tab-license")
+    license_validator.invalidate_cache()
+    state = license_validator.validate(force=True)
+    if state.valid:
+        flash(f"License activated for {state.customer or 'this install'}.", "success")
+    else:
+        flash(f"License rejected: {state.error}", "error")
+    return redirect(url_for("settings.index") + "#tab-license")
 
 
 @bp.route("/", methods=["GET", "POST"])
@@ -70,10 +92,12 @@ def index():
 
     has_password = bool(get_app_password())
     runtime_paths = config.get_runtime_paths()
+    license_state = license_validator.validate().to_dict()
     return render_template(
         "settings.html",
         settings=settings,
         has_password=has_password,
         ip_status=ip_status,
         runtime_paths=runtime_paths,
+        license_state=license_state,
     )

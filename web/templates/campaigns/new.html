@@ -7,6 +7,7 @@
 </div>
 
 <form method="post" class="form-card">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <div class="form-group">
         <label for="name">Campaign Name *</label>
         <input type="text" id="name" name="name" placeholder="e.g., Plumbers in New York" required>

@@ -1,6 +1,12 @@
 """
 Email extraction from HTML — regex + mailto link parsing.
+
+Also handles obfuscated email patterns commonly used to dodge scrapers:
+- `name [at] domain [dot] com` / `name(at)domain(dot)com`
+- HTML entities like `name&#64;domain.com`
+- Fullwidth unicode like `name＠domain．com`
 """
+import html as html_lib
 import re
 from bs4 import BeautifulSoup
 import tldextract
@@ -11,7 +17,52 @@ EMAIL_REGEX = re.compile(
     re.IGNORECASE,
 )
 
+# Obfuscated variants: [at]/[dot] and (at)/(dot) with optional whitespace
+OBFUSCATED_PATTERNS = [
+    re.compile(
+        r"([a-zA-Z0-9._%+\-]+)\s*\[\s*(?:at|@)\s*\]\s*"
+        r"([a-zA-Z0-9.\-]+(?:\s*\[\s*(?:dot|\.)\s*\]\s*[a-zA-Z0-9\-]+)+)",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"([a-zA-Z0-9._%+\-]+)\s*\(\s*(?:at|@)\s*\)\s*"
+        r"([a-zA-Z0-9.\-]+(?:\s*\(\s*(?:dot|\.)\s*\)\s*[a-zA-Z0-9\-]+)+)",
+        re.IGNORECASE,
+    ),
+    # "name at domain dot com" — whitespace-separated
+    re.compile(
+        r"\b([a-zA-Z0-9._%+\-]+)\s+at\s+"
+        r"([a-zA-Z0-9\-]+(?:\s+dot\s+[a-zA-Z0-9\-]+)+)\b",
+        re.IGNORECASE,
+    ),
+]
+
+# Fullwidth unicode -> ASCII
+_UNICODE_NORMALIZE = {
+    "\uFF20": "@",   # ＠
+    "\uFF0E": ".",   # ．
+    "\u2024": ".",   # ․
+    "\uFE52": ".",   # ﹒
+}
+
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".ico", ".bmp"}
+
+
+def _deobfuscate_match(local: str, rest: str) -> str:
+    """Turn 'name', 'domain [dot] com' -> 'name@domain.com'."""
+    domain = re.sub(r"\s*\[\s*(?:dot|\.)\s*\]\s*", ".", rest, flags=re.IGNORECASE)
+    domain = re.sub(r"\s*\(\s*(?:dot|\.)\s*\)\s*", ".", domain, flags=re.IGNORECASE)
+    domain = re.sub(r"\s+dot\s+", ".", domain, flags=re.IGNORECASE)
+    domain = domain.strip().strip(".")
+    return f"{local.strip()}@{domain}".lower()
+
+
+def _normalize_text(text: str) -> str:
+    """Decode HTML entities and fold fullwidth unicode to ASCII."""
+    decoded = html_lib.unescape(text)
+    for src, dst in _UNICODE_NORMALIZE.items():
+        decoded = decoded.replace(src, dst)
+    return decoded
 
 
 def extract_emails(html: str, source_url: str) -> list[dict]:
@@ -34,8 +85,21 @@ def extract_emails(html: str, source_url: str) -> list[dict]:
     for tag in soup(["script", "style", "noscript", "meta", "link"]):
         tag.decompose()
     text = soup.get_text(separator=" ")
-    for match in EMAIL_REGEX.findall(text):
+
+    # Normalize HTML entities + fullwidth unicode before regex
+    normalized = _normalize_text(text)
+
+    # 2a. Standard pattern on normalized text (also catches &#64; / ＠)
+    for match in EMAIL_REGEX.findall(normalized):
         emails_found.add(match.lower())
+
+    # 2b. Obfuscated patterns ([at]/[dot], (at)/(dot), spaced)
+    for pattern in OBFUSCATED_PATTERNS:
+        for local, rest in pattern.findall(normalized):
+            candidate = _deobfuscate_match(local, rest)
+            # Re-validate through standard regex to drop noise
+            if EMAIL_REGEX.fullmatch(candidate):
+                emails_found.add(candidate)
 
     # 3. Filter and build records
     source_ext = tldextract.extract(source_url)

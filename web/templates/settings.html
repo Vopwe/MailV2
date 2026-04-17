@@ -7,6 +7,7 @@
 </div>
 
 <form method="post" class="form-card" style="max-width: 100%; padding: 32px;">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <div class="settings-tabs">
         <button type="button" class="settings-tab active" data-tab="search">Search Engines</button>
         <button type="button" class="settings-tab" data-tab="ips">IP Rotation</button>
@@ -14,6 +15,7 @@
         <button type="button" class="settings-tab" data-tab="crawl">Crawl</button>
         <button type="button" class="settings-tab" data-tab="verify">Verification</button>
         <button type="button" class="settings-tab" data-tab="security">Security</button>
+        <button type="button" class="settings-tab" data-tab="license">License</button>
         <button type="button" class="settings-tab" data-tab="logs">Server Logs</button>
     </div>
 
@@ -90,35 +92,55 @@
         </div>
         {% if ip_status %}
         <div class="form-row">
-            <div class="form-group">
+            <div class="form-group" style="flex: 1 1 100%;">
                 <label>Status</label>
-                <div class="ip-status-grid">
-                    <div class="stat-mini">
-                        <span class="stat-label">Total IPs</span>
-                        <span class="stat-value">{{ ip_status.total_ips }}</span>
-                    </div>
-                    <div class="stat-mini">
-                        <span class="stat-label">Available</span>
-                        <span class="stat-value" style="color: var(--success);">{{ ip_status.available_ips }}</span>
-                    </div>
-                    <div class="stat-mini">
-                        <span class="stat-label">On Cooldown</span>
-                        <span class="stat-value" style="color: var(--warning);">{{ ip_status.cooled_down_ips }}</span>
-                    </div>
+                {% if ip_status.total_ips == 0 %}
+                <div style="padding: 10px 12px; background: #FEF3C7; color: #92400E; border-radius: 4px; font-size: 13px;">
+                    ⚠ No IPs configured — using server default IP.
                 </div>
-                {% if ip_status.cooldown_list %}
-                <span class="hint" style="color: var(--warning);">
-                    Cooled down: {{ ip_status.cooldown_list | join(', ') }}
-                </span>
+                {% elif ip_status.available_ips > 0 %}
+                <div style="padding: 10px 12px; background: #D1FAE5; color: #065F46; border-radius: 4px; font-size: 13px;">
+                    ✓ {{ ip_status.available_ips }} of {{ ip_status.total_ips }} IPs active — rotation working.
+                </div>
+                {% else %}
+                <div style="padding: 10px 12px; background: #FEE2E2; color: #991B1B; border-radius: 4px; font-size: 13px;">
+                    ⚠ All {{ ip_status.total_ips }} IPs on cooldown — waiting to recover.
+                </div>
                 {% endif %}
             </div>
         </div>
-        <div class="form-row">
-            <div class="form-group">
-                <button type="button" class="btn btn-secondary" onclick="refreshIpStatus()" style="margin-top: 8px;">Refresh Status</button>
-                <span class="hint" id="ip-refresh-msg"></span>
+        <details style="margin-top: 12px;">
+            <summary style="cursor: pointer; font-size: 13px; color: var(--text-muted); padding: 6px 0;">Advanced ▾</summary>
+            <div class="form-row" style="margin-top: 10px;">
+                <div class="form-group">
+                    <div class="ip-status-grid">
+                        <div class="stat-mini">
+                            <span class="stat-label">Total IPs</span>
+                            <span class="stat-value">{{ ip_status.total_ips }}</span>
+                        </div>
+                        <div class="stat-mini">
+                            <span class="stat-label">Available</span>
+                            <span class="stat-value" style="color: var(--success);">{{ ip_status.available_ips }}</span>
+                        </div>
+                        <div class="stat-mini">
+                            <span class="stat-label">On Cooldown</span>
+                            <span class="stat-value" style="color: var(--warning);">{{ ip_status.cooled_down_ips }}</span>
+                        </div>
+                    </div>
+                    {% if ip_status.cooldown_list %}
+                    <span class="hint" style="color: var(--warning);">
+                        Cooled down: {{ ip_status.cooldown_list | join(', ') }}
+                    </span>
+                    {% endif %}
+                </div>
             </div>
-        </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <button type="button" class="btn btn-secondary" onclick="refreshIpStatus()" style="margin-top: 8px;">Refresh Status</button>
+                    <span class="hint" id="ip-refresh-msg"></span>
+                </div>
+            </div>
+        </details>
         {% endif %}
     </div>
 
@@ -138,29 +160,35 @@
             </div>
         </div>
         <div class="form-row">
-            <div class="form-group">
-                <label for="openrouter_model">AI Model</label>
-                <select id="openrouter_model" name="openrouter_model">
-                    <option value="openrouter/free" {% if settings.get('openrouter_model', 'openrouter/free') == 'openrouter/free' %}selected{% endif %}>OpenRouter Free Router (Recommended)</option>
-                    <option value="google/gemma-4-31b-it:free" {% if settings.get('openrouter_model') == 'google/gemma-4-31b-it:free' %}selected{% endif %}>Gemma 4 31B (Free)</option>
-                    <option value="openai/gpt-oss-120b:free" {% if settings.get('openrouter_model') == 'openai/gpt-oss-120b:free' %}selected{% endif %}>GPT-OSS 120B (Free)</option>
-                    <option value="nvidia/nemotron-3-super-120b-a12b:free" {% if settings.get('openrouter_model') == 'nvidia/nemotron-3-super-120b-a12b:free' %}selected{% endif %}>Nemotron 3 Super 120B (Free)</option>
-                    <option value="openai/gpt-oss-20b:free" {% if settings.get('openrouter_model') == 'openai/gpt-oss-20b:free' %}selected{% endif %}>GPT-OSS 20B (Free)</option>
-                </select>
-                <span class="hint">Router best for uptime. Specific models best when you want stable exact behavior.</span>
-            </div>
-            <div class="form-group">
+            <div class="form-group" style="flex: 1 1 100%;">
                 <label>Status</label>
-                <div class="ip-status-grid">
-                    <div class="stat-mini">
-                        <span class="stat-label">AI Source</span>
-                        <span class="stat-value" style="color: {% if settings.get('openrouter_api_key') %}var(--success){% else %}var(--text-muted){% endif %};">
-                            {% if settings.get('openrouter_api_key') %}Active{% else %}Disabled{% endif %}
-                        </span>
-                    </div>
+                {% if settings.get('openrouter_api_key') %}
+                <div style="padding: 10px 12px; background: #D1FAE5; color: #065F46; border-radius: 4px; font-size: 13px;">
+                    ✓ AI URL generation active.
                 </div>
+                {% else %}
+                <div style="padding: 10px 12px; background: #F3F4F6; color: #374151; border-radius: 4px; font-size: 13px;">
+                    AI URL generation disabled — add an API key above to enable.
+                </div>
+                {% endif %}
             </div>
         </div>
+        <details style="margin-top: 12px;">
+            <summary style="cursor: pointer; font-size: 13px; color: var(--text-muted); padding: 6px 0;">Advanced ▾</summary>
+            <div class="form-row" style="margin-top: 10px;">
+                <div class="form-group" style="flex: 1 1 100%;">
+                    <label for="openrouter_model">AI Model</label>
+                    <select id="openrouter_model" name="openrouter_model">
+                        <option value="openrouter/free" {% if settings.get('openrouter_model', 'openrouter/free') == 'openrouter/free' %}selected{% endif %}>OpenRouter Free Router (Recommended)</option>
+                        <option value="google/gemma-4-31b-it:free" {% if settings.get('openrouter_model') == 'google/gemma-4-31b-it:free' %}selected{% endif %}>Gemma 4 31B (Free)</option>
+                        <option value="openai/gpt-oss-120b:free" {% if settings.get('openrouter_model') == 'openai/gpt-oss-120b:free' %}selected{% endif %}>GPT-OSS 120B (Free)</option>
+                        <option value="nvidia/nemotron-3-super-120b-a12b:free" {% if settings.get('openrouter_model') == 'nvidia/nemotron-3-super-120b-a12b:free' %}selected{% endif %}>Nemotron 3 Super 120B (Free)</option>
+                        <option value="openai/gpt-oss-20b:free" {% if settings.get('openrouter_model') == 'openai/gpt-oss-20b:free' %}selected{% endif %}>GPT-OSS 20B (Free)</option>
+                    </select>
+                    <span class="hint">Router handles failover automatically. Use specific models when you want deterministic behavior.</span>
+                </div>
+            </div>
+        </details>
     </div>
 
     <div class="settings-panel" id="tab-crawl">
@@ -289,6 +317,67 @@
     </div>
 </form>
 
+<div class="settings-panel" id="tab-license" style="max-width: 100%;">
+    <div class="form-card" style="max-width: 100%; padding: 32px; margin-top: 20px;">
+        <h2>License</h2>
+        {% if license_state and license_state.valid %}
+        <div style="background: #D1FAE5; color: #065F46; padding: 12px 14px; border-radius: 6px; font-size: 13px; margin-bottom: 18px;">
+            <strong>✓ Active</strong> — licensed to {{ license_state.customer or 'this install' }}.
+        </div>
+        <div class="form-row">
+            <div class="form-group">
+                <label>Customer</label>
+                <div class="readonly-value">{{ license_state.customer or '—' }}</div>
+            </div>
+            <div class="form-group">
+                <label>Issued</label>
+                <div class="readonly-value">{{ license_state.issued_at or '—' }}</div>
+            </div>
+        </div>
+        <div class="form-row">
+            <div class="form-group">
+                <label>Expires</label>
+                <div class="readonly-value">{{ license_state.expires_at or 'Never' }}</div>
+            </div>
+            <div class="form-group">
+                <label>Features</label>
+                <div class="readonly-value">
+                    {% if license_state.features %}{{ license_state.features | join(', ') }}{% else %}—{% endif %}
+                </div>
+            </div>
+        </div>
+        {% else %}
+        <div style="background: #FEE2E2; color: #991B1B; padding: 12px 14px; border-radius: 6px; font-size: 13px; margin-bottom: 18px;">
+            <strong>⚠ No active license</strong>{% if license_state and license_state.error %} — {{ license_state.error }}{% endif %}
+        </div>
+        {% endif %}
+
+        <div class="form-row">
+            <div class="form-group" style="flex: 1 1 100%;">
+                <label>Host Fingerprint</label>
+                <div class="readonly-value" style="font-family: 'Courier New', monospace; font-size: 12px; word-break: break-all; background: #F3F4F6; padding: 10px 12px; border-radius: 4px;">
+                    {{ license_state.host_fingerprint if license_state else '' }}
+                </div>
+                <span class="hint">Send this to your vendor to request a license bound to this machine.</span>
+            </div>
+        </div>
+
+        <form method="post" action="{{ url_for('settings.update_license') }}" style="margin-top: 18px;">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <div class="form-row">
+                <div class="form-group" style="flex: 1 1 100%;">
+                    <label for="license">Replace License Key</label>
+                    <textarea id="license" name="license" rows="5" placeholder="Paste the single-line license key you received from your vendor..." style="width: 100%; padding: 12px; border: 1px solid #E5E7EB; border-radius: 4px; font-family: 'Courier New', monospace; font-size: 12px; resize: vertical;"></textarea>
+                    <span class="hint">Pasting a new key replaces the existing license file.</span>
+                </div>
+            </div>
+            <div class="form-actions">
+                <button type="submit" class="btn btn-primary">Install License</button>
+            </div>
+        </form>
+    </div>
+</div>
+
 {% endblock %}
 
 {% block scripts %}
@@ -303,7 +392,7 @@ document.querySelectorAll('.settings-tab').forEach(tab => {
         document.getElementById('tab-' + tab.dataset.tab).classList.add('active');
 
         const saveActions = document.getElementById('form-save-actions');
-        if (saveActions) saveActions.style.display = tab.dataset.tab === 'logs' ? 'none' : '';
+        if (saveActions) saveActions.style.display = (tab.dataset.tab === 'logs' || tab.dataset.tab === 'license') ? 'none' : '';
 
         if(tab.dataset.tab === 'logs') {
             refreshLogs();

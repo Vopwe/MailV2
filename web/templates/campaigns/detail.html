@@ -13,6 +13,7 @@
     <div class="header-actions">
         {% if campaign.status in ['pending', 'done', 'failed'] %}
         <form method="post" action="/campaigns/{{ campaign.id }}/run" class="inline-form">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <button type="submit" class="btn btn-primary">
                 {% if campaign.status == 'pending' %}Run Campaign{% else %}Re-run{% endif %}
             </button>
@@ -20,6 +21,7 @@
         {% endif %}
         {% if campaign.total_emails > 0 %}
         <form method="post" action="/verification" class="inline-form">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <input type="hidden" name="action" value="verify_campaign">
             <input type="hidden" name="campaign_id" value="{{ campaign.id }}">
             <input type="hidden" name="redirect_to" value="/campaigns/{{ campaign.id }}">
@@ -32,26 +34,67 @@
 </div>
 
 {% if campaign.status in ['generating', 'crawling'] or current_task %}
-<div class="progress-section" id="progress-section" data-campaign-id="{{ campaign.id }}" data-task-id="{{ task_id or '' }}">
+<div class="progress-section" id="progress-section" data-campaign-id="{{ campaign.id }}" data-task-id="{{ task_id or '' }}" data-started-at="{{ current_task.started_at if current_task else '' }}">
     <div class="progress-bar-container">
         <div class="progress-bar" id="progress-bar" style="width: {{ current_task.percent if current_task else 0 }}%"></div>
     </div>
-    <p class="progress-text" id="progress-text">
-        {% if current_task %}
-            {% if current_task.status == 'completed' %}
-                {{ current_task.message or 'Completed!' }}
-            {% elif current_task.status == 'failed' %}
-                {{ current_task.error or 'Campaign failed.' }}
+    <div style="display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 10px;">
+        <p class="progress-text" id="progress-text" style="margin: 0; flex: 1 1 auto;">
+            {% if current_task %}
+                {% if current_task.status == 'completed' %}
+                    {{ current_task.message or 'Completed!' }}
+                {% elif current_task.status == 'failed' %}
+                    {{ current_task.error or 'Campaign failed.' }}
+                {% elif current_task.status == 'cancelled' %}
+                    {{ current_task.message or 'Cancelled.' }}
+                {% else %}
+                    {{ current_task.message or 'Running...' }}
+                {% endif %}
             {% else %}
-                {{ current_task.message or 'Running...' }}
+                Running...
             {% endif %}
-        {% else %}
-            Running...
+        </p>
+        <span id="progress-eta" style="font-size: 13px; color: var(--text-muted);"></span>
+        {% if current_task and current_task.status == 'running' %}
+        <form method="post" action="{{ url_for('campaigns.cancel', campaign_id=campaign.id) }}" style="margin: 0;">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="btn btn-secondary btn-sm" {% if current_task.cancel_requested %}disabled{% endif %}>
+                {% if current_task.cancel_requested %}Cancelling…{% else %}Cancel{% endif %}
+            </button>
+        </form>
         {% endif %}
-    </p>
+    </div>
 </div>
 {% endif %}
 
+{% if current_task and current_task.status == 'failed' %}
+<div class="section" style="border: 1px solid #FCA5A5; background: #FEF2F2; border-radius: var(--radius); padding: 18px; margin-bottom: 20px;">
+    <h3 style="color: #991B1B; margin: 0 0 8px 0; font-size: 15px;">⚠ Campaign failed</h3>
+    <p style="font-size: 13px; color: #7F1D1D; margin: 0 0 14px 0; word-break: break-word;">{{ current_task.error or 'Unknown error.' }}</p>
+    <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+        <form method="post" action="{{ url_for('campaigns.run', campaign_id=campaign.id) }}" style="margin: 0;">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="btn btn-primary btn-sm">Retry Campaign</button>
+        </form>
+        <button type="button" class="btn btn-secondary btn-sm" onclick="toggleErrorLog()">View Log Tail</button>
+    </div>
+    <pre id="error-log-tail" style="display: none; margin-top: 14px; max-height: 240px; overflow: auto; background: #1F2937; color: #E5E7EB; padding: 12px; border-radius: 4px; font-size: 11.5px;">Loading…</pre>
+</div>
+<script>
+function toggleErrorLog() {
+    const pre = document.getElementById('error-log-tail');
+    if (pre.style.display === 'none') {
+        pre.style.display = 'block';
+        fetch('/api/logs?lines=50')
+            .then(r => r.ok ? r.text() : Promise.reject())
+            .then(txt => { pre.textContent = txt || '(no log output)'; })
+            .catch(() => { pre.textContent = 'Failed to load logs.'; });
+    } else {
+        pre.style.display = 'none';
+    }
+}
+</script>
+{% endif %}
 
 <div class="stats-grid stats-grid-sm">
     <div class="stat-card">

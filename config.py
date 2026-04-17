@@ -7,6 +7,17 @@ import os
 import secrets
 import time
 
+# ─── Feature Flags ────────────────────────────────────────────────────
+
+def tls_verify() -> bool:
+    """
+    Whether outbound httpx clients should verify TLS certificates.
+    Default True. Only set CRAWL_TLS_VERIFY=false on networks that proxy
+    outbound TLS via an internal CA (rare).
+    """
+    return os.getenv("CRAWL_TLS_VERIFY", "true").strip().lower() not in ("false", "0", "no")
+
+
 # ─── Paths ────────────────────────────────────────────────────────────
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 SETTINGS_PATH = os.path.join(BASE_DIR, "settings.json")
@@ -99,8 +110,24 @@ def _load_settings() -> dict:
     return {}
 
 
+# Sensitive settings that should prefer env vars over settings.json.
+# Env var name is GM_<KEY_UPPER>. Useful for container / systemd EnvironmentFile deploys.
+_ENV_OVERRIDABLE_KEYS = {
+    "openrouter_api_key",
+    "app_password_hash",
+}
+
+
 def get_setting(key: str, default=None):
-    """Get a runtime setting. Falls back to the provided default."""
+    """
+    Get a runtime setting.
+    Lookup order for sensitive keys: env var GM_<KEY> → settings.json → default.
+    Non-sensitive keys: settings.json → default.
+    """
+    if key in _ENV_OVERRIDABLE_KEYS:
+        env_val = os.getenv(f"GM_{key.upper()}")
+        if env_val:
+            return env_val
     settings = _load_settings()
     return settings.get(key, default)
 

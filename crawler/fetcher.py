@@ -49,17 +49,41 @@ def _new_crawl_stats() -> dict:
     }
 
 
+_RETRYABLE_STATUS = {502, 503, 504}
+
+
 async def fetch_page(client: httpx.AsyncClient, url: str) -> tuple[str, str | None, int | None]:
-    """Fetch a single page. Returns (url, html_or_none, status_code_or_none)."""
-    try:
-        resp = await client.get(url, follow_redirects=True)
-        content_type = resp.headers.get("content-type", "")
-        if resp.status_code == 200 and "text/html" in content_type:
-            return url, resp.text, resp.status_code
-        return url, None, resp.status_code
-    except (httpx.HTTPError, httpx.TimeoutException, Exception) as e:
-        logger.debug(f"Failed to fetch {url}: {e}")
-        return url, None, None
+    """
+    Fetch a single page with retry on transient failures.
+    Retries: 3 attempts, exponential backoff (1s, 3s), on connect errors / timeouts / 5xx.
+    Does not retry 4xx — terminal.
+    Returns (url, html_or_none, status_code_or_none).
+    """
+    max_attempts = 3
+    for attempt in range(1, max_attempts + 1):
+        try:
+            resp = await client.get(url, follow_redirects=True)
+            if resp.status_code in _RETRYABLE_STATUS and attempt < max_attempts:
+                backoff = 3 ** (attempt - 1)
+                logger.warning(f"Retry {attempt}/{max_attempts} for {url}: HTTP {resp.status_code}")
+                await asyncio.sleep(backoff)
+                continue
+            content_type = resp.headers.get("content-type", "")
+            if resp.status_code == 200 and "text/html" in content_type:
+                return url, resp.text, resp.status_code
+            return url, None, resp.status_code
+        except (httpx.ConnectError, httpx.ReadTimeout, httpx.ConnectTimeout) as e:
+            if attempt < max_attempts:
+                backoff = 3 ** (attempt - 1)
+                logger.warning(f"Retry {attempt}/{max_attempts} for {url}: {type(e).__name__}")
+                await asyncio.sleep(backoff)
+                continue
+            logger.debug(f"Failed to fetch {url} after {max_attempts} attempts: {e}")
+            return url, None, None
+        except (httpx.HTTPError, Exception) as e:
+            logger.debug(f"Failed to fetch {url}: {e}")
+            return url, None, None
+    return url, None, None
 
 
 async def _fetch_robots_txt(client: httpx.AsyncClient, base_url: str) -> set[str]:
@@ -162,7 +186,7 @@ async def fetch_domain_pages(base_url: str, semaphore: asyncio.Semaphore,
             timeout=httpx.Timeout(timeout),
             headers={"User-Agent": ua.random},
             http2=True,
-            verify=False,
+            verify=config.tls_verify(),
         ) as client:
             # 1. Check robots.txt (even in soft mode, we parse it to block admin paths)
             disallowed = set()

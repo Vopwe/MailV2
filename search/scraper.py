@@ -309,7 +309,7 @@ async def _scrape_bing_page(query: str, first: int = 0, mkt: str = "en-US", cc: 
             headers=headers,
             follow_redirects=True,
             http2=False,
-            verify=False,
+            verify=config.tls_verify(),
         ) as client:
             resp = await client.get(BING_SEARCH_URL, params=params)
 

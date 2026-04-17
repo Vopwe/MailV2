@@ -17,6 +17,11 @@ setup_logging()
 app = create_app()
 
 if __name__ == "__main__":
+    debug_mode = os.getenv("FLASK_DEBUG", "0") == "1"
+    host = os.getenv("FLASK_HOST", "0.0.0.0")
+    port = int(os.getenv("FLASK_PORT", "5000"))
     print("\n  Email Extractor is running!")
-    print("  Open http://localhost:5000 in your browser\n")
-    app.run(host="0.0.0.0", port=5000, debug=True, use_reloader=False)
+    print(f"  Open http://localhost:{port} in your browser\n")
+    if debug_mode:
+        print("  ⚠ DEBUG MODE ON — do not expose this publicly\n")
+    app.run(host=host, port=port, debug=debug_mode, use_reloader=False)

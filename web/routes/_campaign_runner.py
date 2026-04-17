@@ -54,6 +54,18 @@ def _generate_for_combo(combo, urls_per_batch):
         }
 
 
+class CampaignCancelled(Exception):
+    """Raised when user cancels the campaign mid-run."""
+
+
+def _check_cancel(task_id: str, campaign_id: int):
+    if tasks.is_cancelled(task_id):
+        database.update_campaign_status(campaign_id, "cancelled")
+        database.update_campaign_counts(campaign_id)
+        tasks.mark_cancelled(task_id)
+        raise CampaignCancelled()
+
+
 async def run_campaign(task_id: str, campaign_id: int):
     """Full campaign pipeline: scrape Bing for URLs → crawl → extract emails."""
     campaign = database.get_campaign(campaign_id)
@@ -63,6 +75,9 @@ async def run_campaign(task_id: str, campaign_id: int):
 
     try:
         await _run_campaign_steps(task_id, campaign_id, campaign)
+    except CampaignCancelled:
+        logger.info("Campaign %s cancelled by user", campaign_id)
+        return
     except Exception:
         logger.exception("Campaign %s failed", campaign_id)
         database.update_campaign_status(campaign_id, "failed")
@@ -116,6 +131,7 @@ async def _run_campaign_steps(task_id: str, campaign_id: int, campaign: dict):
             for combo in combos
         }
         for future in as_completed(futures):
+            _check_cancel(task_id, campaign_id)
             combo = futures[future]
             result = future.result()
             rows = result["rows"]
@@ -163,12 +179,16 @@ async def _run_campaign_steps(task_id: str, campaign_id: int, campaign: dict):
 
     crawl_results, crawl_stats = await crawl_urls(pending_urls, on_progress=on_crawl_progress)
 
+    _check_cancel(task_id, campaign_id)
+
     tasks.update_task(task_id, message="Extracting emails...")
     total_extracted = 0
     domains_with_emails = 0
     domains_without_emails = 0
 
     for url_record in pending_urls:
+        if tasks.is_cancelled(task_id):
+            _check_cancel(task_id, campaign_id)
         url_id = url_record["id"]
         pages = crawl_results.get(url_id, [])
 

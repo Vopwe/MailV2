@@ -104,12 +104,13 @@ async def _scrape_ddg_page(query: str, ip: str | None = None) -> list[str]:
             transport = None
 
     try:
+        import config as _cfg
         async with httpx.AsyncClient(
             transport=transport,
             timeout=httpx.Timeout(15.0),
             headers=headers,
             follow_redirects=True,
-            verify=False,
+            verify=_cfg.tls_verify(),
         ) as client:
             # DDG HTML lite uses POST for searches
             resp = await client.post(DDG_URL, data={"q": query, "b": ""})

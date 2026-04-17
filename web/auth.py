@@ -2,11 +2,14 @@
 Simple password protection for GraphenMail.
 Single-user auth using a password stored in settings.json.
 """
-import hashlib
+import logging
 import secrets
 from functools import wraps
 from flask import request, redirect, url_for, session, flash, render_template_string
+from werkzeug.security import generate_password_hash, check_password_hash
 import config
+
+logger = logging.getLogger(__name__)
 
 LOGIN_TEMPLATE = """
 <!DOCTYPE html>
@@ -47,6 +50,7 @@ LOGIN_TEMPLATE = """
         <p>Enter your password to continue</p>
         {% if error %}<div class="error">{{ error }}</div>{% endif %}
         <form method="post">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <div class="form-group">
                 <label for="password">Password</label>
                 <input type="password" id="password" name="password" autofocus required>
@@ -59,30 +63,76 @@ LOGIN_TEMPLATE = """
 """
 
 
-def _hash_password(password: str) -> str:
-    return hashlib.sha256(password.encode()).hexdigest()
+def _migrate_legacy_password_if_needed():
+    """
+    Migrate legacy storage on first access:
+      - If only plaintext `app_password` present: hash it with werkzeug, strip plaintext.
+      - If only legacy SHA256 hex hash present: leave it (check_password falls through).
+      - If plaintext AND hash both present: strip plaintext.
+    """
+    import hashlib as _hashlib
+    plaintext = config.get_setting("app_password", "")
+    stored = config.get_setting("app_password_hash", "")
+
+    if plaintext and not stored:
+        # Upgrade plaintext to werkzeug hash
+        new_hash = generate_password_hash(plaintext)
+        config.save_settings({"app_password_hash": new_hash, "app_password": ""})
+        logger.info("Migrated legacy plaintext password to hashed storage.")
+        return
+
+    if plaintext and stored:
+        # Just strip plaintext — keep whichever hash was stored.
+        config.save_settings({"app_password": ""})
+        logger.info("Stripped redundant plaintext password from settings.")
+        return
+
+    # Detect legacy SHA256 hash (64 hex chars, no $ prefix from werkzeug) and upgrade
+    # only if we had the plaintext — otherwise it stays as-is and check_password handles it.
 
 
+def has_app_password() -> bool:
+    """True if a password is configured (checks both hash and legacy plaintext)."""
+    return bool(config.get_setting("app_password_hash", "") or config.get_setting("app_password", ""))
+
+
+# Keep `get_app_password` alias for backward compat across the codebase (route/settings).
 def get_app_password() -> str | None:
-    """Get the configured password. Returns None if no password is set."""
-    pw = config.get_setting("app_password", "")
-    return pw if pw else None
+    return "set" if has_app_password() else None
 
 
 def set_app_password(password: str):
-    """Set the app password (stored as hash)."""
-    config.save_settings({"app_password_hash": _hash_password(password), "app_password": password})
+    """Set the app password. Stored as werkzeug hash only — never plaintext."""
+    new_hash = generate_password_hash(password)
+    # Explicitly clear any lingering plaintext key.
+    config.save_settings({"app_password_hash": new_hash, "app_password": ""})
 
 
 def check_password(password: str) -> bool:
-    """Check password against stored hash or plaintext."""
+    """Verify password against stored hash. Handles werkzeug, legacy SHA256, and (deprecated) plaintext."""
+    import hashlib as _hashlib
     stored_hash = config.get_setting("app_password_hash", "")
-    stored_plain = config.get_setting("app_password", "")
+    stored_plain = config.get_setting("app_password", "")  # legacy
 
     if stored_hash:
-        return _hash_password(password) == stored_hash
+        # werkzeug hashes start with "pbkdf2:" or "scrypt:" etc; legacy SHA256 is 64 hex chars.
+        if stored_hash.startswith(("pbkdf2:", "scrypt:", "argon2:")):
+            return check_password_hash(stored_hash, password)
+        # Legacy SHA256 fallback — migrate on successful check.
+        if len(stored_hash) == 64 and all(c in "0123456789abcdef" for c in stored_hash):
+            legacy = _hashlib.sha256(password.encode()).hexdigest()
+            if legacy == stored_hash:
+                # Upgrade to werkzeug hash for future checks.
+                config.save_settings({"app_password_hash": generate_password_hash(password), "app_password": ""})
+                return True
+            return False
+        return False
     if stored_plain:
-        return password == stored_plain
+        ok = password == stored_plain
+        if ok:
+            # Upgrade on successful legacy-plaintext login.
+            config.save_settings({"app_password_hash": generate_password_hash(password), "app_password": ""})
+        return ok
     return False
 
 
@@ -100,6 +150,12 @@ def login_required(f):
 
 def init_auth(app):
     """Register auth blueprint and protect all routes."""
+    # One-shot migration for any lingering plaintext password from older installs.
+    try:
+        _migrate_legacy_password_if_needed()
+    except Exception as e:
+        logger.warning(f"Password migration skipped: {e}")
+
     from flask import Blueprint
     auth_bp = Blueprint("auth", __name__)
 
@@ -128,9 +184,12 @@ def init_auth(app):
     def protect_routes():
         if not get_app_password():
             return
-        if request.endpoint and request.endpoint.startswith("auth."):
-            return
-        if request.endpoint == "static":
+        endpoint = request.endpoint or ""
+        # Allow auth, static, license gate, onboarding (user may be mid-setup)
+        if (endpoint.startswith("auth.")
+                or endpoint == "static"
+                or endpoint.startswith("license_gate.")
+                or endpoint.startswith("onboarding.")):
             return
         if not session.get("authenticated"):
             return redirect(url_for("auth.login"))

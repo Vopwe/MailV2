@@ -975,8 +975,9 @@ details summary:hover {
     border-color: var(--orange);
 }
 
-/* ─── Export Toast ─────────────────────────────────────────────────── */
-.export-toast {
+/* ─── Toasts ──────────────────────────────────────────────────────── */
+.export-toast,
+.gm-toast {
     position: fixed;
     bottom: 24px;
     right: 24px;
@@ -991,12 +992,67 @@ details summary:hover {
     transform: translateY(10px);
     transition: opacity 0.3s, transform 0.3s;
     pointer-events: none;
+    max-width: 360px;
 }
 
-.export-toast.visible {
+.export-toast.visible,
+.gm-toast.visible {
     opacity: 1;
     transform: translateY(0);
     pointer-events: auto;
+}
+
+.gm-toast.gm-toast-error   { background: #991B1B; }
+.gm-toast.gm-toast-warning { background: #92400E; }
+.gm-toast.gm-toast-info    { background: #1E3A8A; }
+.gm-toast.gm-toast-success { background: #065F46; }
+
+/* ─── Loading skeletons ───────────────────────────────────────────── */
+@keyframes gm-skeleton-shimmer {
+    0%   { background-position: -400px 0; }
+    100% { background-position:  400px 0; }
+}
+
+.skeleton {
+    display: inline-block;
+    min-height: 14px;
+    border-radius: 4px;
+    background: linear-gradient(90deg, #F3F4F6 0%, #E5E7EB 50%, #F3F4F6 100%);
+    background-size: 800px 100%;
+    animation: gm-skeleton-shimmer 1.2s linear infinite;
+    color: transparent !important;
+}
+
+.skeleton-block {
+    display: block;
+    height: 14px;
+    margin: 6px 0;
+    border-radius: 4px;
+    background: linear-gradient(90deg, #F3F4F6 0%, #E5E7EB 50%, #F3F4F6 100%);
+    background-size: 800px 100%;
+    animation: gm-skeleton-shimmer 1.2s linear infinite;
+}
+
+/* ─── Empty states ────────────────────────────────────────────────── */
+.empty-illustration {
+    text-align: center;
+    padding: 48px 24px;
+    color: var(--text-muted);
+}
+.empty-illustration svg {
+    width: 72px;
+    height: 72px;
+    opacity: 0.35;
+    margin-bottom: 16px;
+}
+.empty-illustration h3 {
+    font-size: 16px;
+    color: var(--text);
+    margin-bottom: 6px;
+}
+.empty-illustration p {
+    font-size: 13px;
+    margin-bottom: 16px;
 }
 
 /* ─── IP Status Grid ──────────────────────────────────────────────── */

@@ -3,6 +3,21 @@
  * Task polling, sidebar toggle, utilities.
  */
 
+// ─── Reusable toast helper ─────────────────────────────────────────────
+// Usage: showToast("Saved!"), showToast("Oops", "error"), etc.
+window.showToast = function(message, type = "success", duration = 4000) {
+    const el = document.createElement("div");
+    el.className = `gm-toast gm-toast-${type}`;
+    el.textContent = message;
+    document.body.appendChild(el);
+    // Force layout so transition triggers
+    requestAnimationFrame(() => el.classList.add("visible"));
+    setTimeout(() => {
+        el.classList.remove("visible");
+        setTimeout(() => el.remove(), 400);
+    }, duration);
+};
+
 // ─── Sidebar Toggle (Mobile) ───────────────────────────────────────────
 
 document.addEventListener('DOMContentLoaded', function() {
@@ -56,10 +71,32 @@ function pollTasks() {
         statusBadge.className = `badge badge-${status}`;
     }
 
+    const progressEta = document.getElementById('progress-eta');
+    const startedAt = progressSection.dataset.startedAt || '';
+
+    function computeEta(percent) {
+        if (!startedAt || !percent || percent <= 0 || percent >= 100) return '';
+        const startMs = Date.parse(startedAt);
+        if (!startMs) return '';
+        const elapsed = Date.now() - startMs;
+        if (elapsed < 3000) return '';
+        const totalEst = elapsed / (percent / 100);
+        const remainMs = totalEst - elapsed;
+        if (remainMs < 1000) return '';
+        const secs = Math.round(remainMs / 1000);
+        if (secs < 60) return `~${secs}s left`;
+        const mins = Math.round(secs / 60);
+        if (mins < 60) return `~${mins} min left`;
+        const hrs = Math.floor(mins / 60);
+        const rem = mins % 60;
+        return `~${hrs}h ${rem}m left`;
+    }
+
     function setProgress(percent, message) {
         progressSection.style.display = '';
         if (progressBar) progressBar.style.width = `${percent}%`;
         if (progressText) progressText.textContent = message;
+        if (progressEta) progressEta.textContent = computeEta(percent);
     }
 
     function reloadWithoutTaskParam() {
@@ -103,6 +140,13 @@ function pollTasks() {
         if (task.status === 'completed') {
             setStatus('done');
             setProgress(100, task.message || 'Completed!');
+            reloadWithoutTaskParam();
+            return;
+        }
+
+        if (task.status === 'cancelled') {
+            setStatus('cancelled');
+            setProgress(task.percent || 0, task.message || 'Cancelled.');
             reloadWithoutTaskParam();
             return;
         }
