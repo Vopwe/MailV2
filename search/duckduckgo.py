@@ -87,7 +87,7 @@ def _filter_ddg_urls(raw_urls: list[str]) -> list[str]:
 
 async def _scrape_ddg_page(query: str, ip=_AUTO_IP, allow_default_retry: bool = True) -> list[str]:
     """Scrape a single DDG HTML lite page. Returns list of URLs."""
-    from search.rotator import cooldown_ip, get_next_ip, mark_ip_unhealthy, record_ip_healthy
+    from search.rotator import cooldown_ip, get_next_ip, mark_ip_unhealthy, record_ip_empty, record_ip_healthy
 
     if ip is _AUTO_IP:
         ip = get_next_ip()
@@ -137,9 +137,12 @@ async def _scrape_ddg_page(query: str, ip=_AUTO_IP, allow_default_retry: bool = 
                     return await _scrape_ddg_page(query, ip=None, allow_default_retry=False)
                 return []
 
-            if ip:
-                record_ip_healthy(ip)
             urls = _parse_ddg_results(resp.text)
+            if ip:
+                if urls:
+                    record_ip_healthy(ip, result_count=len(urls))
+                else:
+                    record_ip_empty(ip)
             if not urls and ip and allow_default_retry:
                 logger.warning("Retrying DDG query on default route after 0 parsed URLs from IP %s", ip)
                 fallback_urls = await _scrape_ddg_page(query, ip=None, allow_default_retry=False)

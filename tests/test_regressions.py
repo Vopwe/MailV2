@@ -867,6 +867,7 @@ class RegressionTests(unittest.TestCase):
         rotator._index = 0
         rotator._cooldowns.clear()
         rotator._health_cache.clear()
+        rotator._ip_stats.clear()
 
         with patch("search.rotator.config.get_setting", return_value=["2001:db8::1", "2001:db8::2"]), \
              patch.object(rotator, "HEALTHCHECK_HOSTS", ("www.bing.com",)), \
@@ -885,6 +886,7 @@ class RegressionTests(unittest.TestCase):
         rotator._index = 0
         rotator._cooldowns.clear()
         rotator._health_cache.clear()
+        rotator._ip_stats.clear()
 
         with patch("search.rotator.config.get_setting", side_effect=lambda key, default=None: {
             "search_ip_rotation_enabled": False,
@@ -896,6 +898,50 @@ class RegressionTests(unittest.TestCase):
 
         self.assertFalse(status["enabled"])
         self.assertEqual(status["total_ips"], 2)
+
+    def test_rotator_prefers_ip_with_real_results_over_probe_only_ip(self):
+        rotator._index = 0
+        rotator._cooldowns.clear()
+        rotator._health_cache.clear()
+        rotator._ip_stats.clear()
+
+        with patch("search.rotator.config.get_setting", side_effect=lambda key, default=None: {
+            "search_ip_rotation_enabled": True,
+            "outbound_ips": ["2001:db8::1", "2001:db8::2"],
+        }.get(key, default)):
+            rotator.record_ip_healthy("2001:db8::1")
+            rotator.record_ip_healthy("2001:db8::2")
+            rotator.record_ip_healthy("2001:db8::2", result_count=6)
+
+            chosen = rotator.get_next_ip()
+            status = rotator.get_status()
+
+        self.assertEqual(chosen, "2001:db8::2")
+        self.assertEqual(status["ranked_ips"][0]["ip"], "2001:db8::2")
+        self.assertGreater(status["ranked_ips"][0]["score"], status["ranked_ips"][1]["score"])
+
+    def test_rotator_deprioritizes_empty_result_ip_without_cooldown(self):
+        rotator._index = 0
+        rotator._cooldowns.clear()
+        rotator._health_cache.clear()
+        rotator._ip_stats.clear()
+
+        with patch("search.rotator.config.get_setting", side_effect=lambda key, default=None: {
+            "search_ip_rotation_enabled": True,
+            "outbound_ips": ["2001:db8::10", "2001:db8::11"],
+        }.get(key, default)):
+            rotator.record_ip_healthy("2001:db8::10")
+            rotator.record_ip_healthy("2001:db8::11")
+            rotator.record_ip_empty("2001:db8::10")
+            rotator.record_ip_healthy("2001:db8::11", result_count=2)
+
+            chosen = rotator.get_next_ip()
+            status = rotator.get_status()
+
+        self.assertEqual(chosen, "2001:db8::11")
+        self.assertEqual(status["ranked_ips"][0]["ip"], "2001:db8::11")
+        self.assertEqual(status["ranked_ips"][1]["ip"], "2001:db8::10")
+        self.assertEqual(status["cooled_down_ips"], 0)
 
     def test_bing_bound_ip_falls_back_to_default_route_and_marks_ip_unhealthy(self):
         from search import scraper

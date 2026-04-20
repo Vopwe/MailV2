@@ -1,5 +1,5 @@
 """
-IP Rotator - round-robin across multiple outbound IPs.
+IP Rotator - result-aware outbound IP selection.
 Supports IPv4 and IPv6. Gracefully degrades to a single default route.
 """
 import ipaddress
@@ -18,11 +18,17 @@ _lock = threading.Lock()
 _index = 0
 _cooldowns: dict[str, float] = {}
 _health_cache: dict[str, tuple[float, bool]] = {}
+_ip_stats: dict[str, dict[str, float | int]] = {}
 
 COOLDOWN_SECONDS = 300
 DEAD_IP_RETRY_SECONDS = 60
 HEALTH_CACHE_SECONDS = 300
 HEALTHCHECK_TIMEOUT_SECONDS = 2.5
+PROBE_SUCCESS_BONUS = 0.25
+SEARCH_SUCCESS_BONUS_MAX = 4.0
+EMPTY_RESULT_PENALTY = 1.5
+UNHEALTHY_PENALTY = 3.0
+COOLDOWN_PENALTY = 4.0
 HEALTHCHECK_HOSTS = (
     "www.bing.com",
     "html.duckduckgo.com",
@@ -83,10 +89,45 @@ def _get_cached_health(ip: str, now: float | None = None) -> bool | None:
         return healthy
 
 
-def record_ip_healthy(ip: str):
-    """Refresh health cache for an IP after a successful request."""
+def _ensure_ip_stats(ip: str) -> dict[str, float | int]:
+    return _ip_stats.setdefault(
+        ip,
+        {
+            "score": 0.0,
+            "last_used": 0.0,
+            "last_success_at": 0.0,
+            "probe_successes": 0,
+            "search_successes": 0,
+            "empty_results": 0,
+            "failures": 0,
+        },
+    )
+
+
+def _adjust_score(ip: str, delta: float) -> dict[str, float | int]:
+    stats = _ensure_ip_stats(ip)
+    stats["score"] = max(float(stats["score"]) + delta, -20.0)
+    return stats
+
+
+def record_ip_healthy(ip: str, *, result_count: int | None = None):
+    """Refresh health cache for an IP after a probe or successful search request."""
+    now = time.time()
     with _lock:
-        _health_cache[ip] = (time.time() + HEALTH_CACHE_SECONDS, True)
+        _health_cache[ip] = (now + HEALTH_CACHE_SECONDS, True)
+        stats = _adjust_score(ip, PROBE_SUCCESS_BONUS if result_count is None else min(max(result_count, 1), SEARCH_SUCCESS_BONUS_MAX))
+        if result_count is None:
+            stats["probe_successes"] = int(stats["probe_successes"]) + 1
+        else:
+            stats["search_successes"] = int(stats["search_successes"]) + 1
+            stats["last_success_at"] = now
+
+
+def record_ip_empty(ip: str):
+    """Penalize an IP that returned a valid response but no usable search results."""
+    with _lock:
+        stats = _adjust_score(ip, -EMPTY_RESULT_PENALTY)
+        stats["empty_results"] = int(stats["empty_results"]) + 1
 
 
 def mark_ip_unhealthy(ip: str, reason: str = "", retry_after: int = DEAD_IP_RETRY_SECONDS):
@@ -94,6 +135,8 @@ def mark_ip_unhealthy(ip: str, reason: str = "", retry_after: int = DEAD_IP_RETR
     retry_after = max(5, int(retry_after))
     with _lock:
         _health_cache[ip] = (time.time() + retry_after, False)
+        stats = _adjust_score(ip, -UNHEALTHY_PENALTY)
+        stats["failures"] = int(stats["failures"]) + 1
     if reason:
         logger.warning("IP %s marked unhealthy for %ss: %s", ip, retry_after, reason)
     else:
@@ -166,14 +209,32 @@ def get_available_ips() -> list[str]:
 
 
 def get_next_ip() -> str | None:
-    """Get next healthy IP in round-robin rotation. None means default route."""
+    """Get best healthy IP using real search outcomes, not blind round-robin."""
     global _index
     available = get_available_ips()
     if not available:
         return None
 
     with _lock:
-        ip = available[_index % len(available)]
+        now = time.time()
+        for ip in available:
+            _ensure_ip_stats(ip)
+        ranked = sorted(
+            available,
+            key=lambda candidate: (
+                -float(_ip_stats[candidate]["score"]),
+                float(_ip_stats[candidate]["last_used"]),
+                -float(_ip_stats[candidate]["last_success_at"]),
+                int(_ip_stats[candidate]["failures"]),
+                int(_ip_stats[candidate]["empty_results"]),
+                candidate,
+            ),
+        )
+        start_index = _index % len(ranked)
+        best_score = float(_ip_stats[ranked[0]]["score"])
+        candidates = [ip for ip in ranked if float(_ip_stats[ip]["score"]) == best_score]
+        ip = candidates[start_index % len(candidates)] if candidates else ranked[0]
+        _ensure_ip_stats(ip)["last_used"] = now
         _index += 1
 
     return ip
@@ -183,6 +244,8 @@ def cooldown_ip(ip: str):
     """Put an IP on cooldown after a remote-side block like 429/captcha."""
     with _lock:
         _cooldowns[ip] = time.time() + COOLDOWN_SECONDS
+        stats = _adjust_score(ip, -COOLDOWN_PENALTY)
+        stats["failures"] = int(stats["failures"]) + 1
     logger.warning("IP %s on cooldown for %ss", ip, COOLDOWN_SECONDS)
 
 
@@ -202,6 +265,21 @@ def get_status() -> dict:
             for ip, (expires_at, healthy) in _health_cache.items()
             if not healthy and expires_at >= now
         ]
+        ranked_ips = sorted(
+            (
+                {
+                    "ip": ip,
+                    "score": round(float(_ensure_ip_stats(ip)["score"]), 2),
+                    "last_used": float(_ensure_ip_stats(ip)["last_used"]),
+                    "last_success_at": float(_ensure_ip_stats(ip)["last_success_at"]),
+                    "search_successes": int(_ensure_ip_stats(ip)["search_successes"]),
+                    "empty_results": int(_ensure_ip_stats(ip)["empty_results"]),
+                    "failures": int(_ensure_ip_stats(ip)["failures"]),
+                }
+                for ip in all_ips
+            ),
+            key=lambda item: (-item["score"], item["last_used"], item["ip"]),
+        )
     return {
         "enabled": bool(config.get_setting("search_ip_rotation_enabled", False)),
         "total_ips": len(all_ips),
@@ -210,4 +288,5 @@ def get_status() -> dict:
         "cooldown_list": cooled,
         "unhealthy_ips": len(unhealthy),
         "unhealthy_list": unhealthy,
+        "ranked_ips": ranked_ips,
     }

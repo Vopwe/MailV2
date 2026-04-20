@@ -17,7 +17,7 @@ from bs4 import BeautifulSoup
 from fake_useragent import UserAgent
 
 import config
-from search.rotator import cooldown_ip, get_next_ip, mark_ip_unhealthy, record_ip_healthy
+from search.rotator import cooldown_ip, get_next_ip, mark_ip_unhealthy, record_ip_empty, record_ip_healthy
 from search.queries import build_queries
 
 logger = logging.getLogger(__name__)
@@ -387,9 +387,12 @@ async def _scrape_bing_page(
                         )
                 return [], True
 
-            if ip:
-                record_ip_healthy(ip)
             urls = _parse_bing_results(html)
+            if ip:
+                if urls:
+                    record_ip_healthy(ip, result_count=len(urls))
+                else:
+                    record_ip_empty(ip)
             if not urls and ip and allow_default_retry:
                 logger.warning("Retrying Bing query on default route after 0 parsed URLs from IP %s", ip)
                 fallback_urls, was_blocked = await _scrape_bing_page(
