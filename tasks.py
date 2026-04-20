@@ -43,7 +43,6 @@ class TaskStatus:
 # In-memory cache (fast reads); DB is source of truth
 _tasks: dict[str, TaskStatus] = {}
 _lock = threading.Lock()
-_db_write_counter = 0  # throttle DB writes
 
 
 def _persist(task: TaskStatus):
@@ -64,6 +63,55 @@ def _persist(task: TaskStatus):
         )
     except Exception:
         pass  # don't break task flow on DB error
+
+
+def _task_from_row(row: dict) -> TaskStatus:
+    return TaskStatus(
+        task_id=row.get("task_id", ""),
+        task_type=row.get("task_type", ""),
+        campaign_id=row.get("campaign_id"),
+        status=row.get("status", "completed"),
+        progress=row.get("progress", 0),
+        total=row.get("total", 0),
+        message=row.get("message", ""),
+        error=row.get("error", ""),
+        started_at=row.get("started_at", ""),
+        completed_at=row.get("completed_at", ""),
+    )
+
+
+def _sync_task_from_db(task_id: str) -> TaskStatus | None:
+    try:
+        import database
+        row = database.get_db_task(task_id)
+    except Exception:
+        return None
+    if not row:
+        return None
+
+    task = _task_from_row(row)
+    with _lock:
+        existing = _tasks.get(task_id)
+        if existing and existing.started_at >= task.started_at:
+            return existing
+        _tasks[task_id] = task
+    return task
+
+
+def _sync_all_from_db():
+    try:
+        import database
+        rows = database.get_db_tasks()
+    except Exception:
+        return
+
+    with _lock:
+        for row in rows:
+            task = _task_from_row(row)
+            existing = _tasks.get(task.task_id)
+            if existing and existing.started_at >= task.started_at:
+                continue
+            _tasks[task.task_id] = task
 
 
 def _load_from_db():
@@ -117,7 +165,10 @@ def create_task(task_type: str = "", campaign_id: int | None = None) -> str:
 
 
 def get_task(task_id: str) -> TaskStatus | None:
-    return _tasks.get(task_id)
+    task = _tasks.get(task_id)
+    if task is not None:
+        return task
+    return _sync_task_from_db(task_id)
 
 
 def find_latest_task(
@@ -125,6 +176,7 @@ def find_latest_task(
     campaign_id: int | None = None,
     statuses: tuple[str, ...] | None = None,
 ) -> TaskStatus | None:
+    _sync_all_from_db()
     with _lock:
         matches = list(_tasks.values())
 
@@ -140,17 +192,13 @@ def find_latest_task(
 
 
 def update_task(task_id: str, **kwargs):
-    global _db_write_counter
     with _lock:
         task = _tasks.get(task_id)
         if task:
             for k, v in kwargs.items():
                 setattr(task, k, v)
     if task:
-        # Persist every 5th update to reduce DB writes during progress
-        _db_write_counter += 1
-        if _db_write_counter % 5 == 0:
-            _persist(task)
+        _persist(task)
 
 
 def complete_task(task_id: str, message: str = "Done"):
@@ -225,5 +273,6 @@ def run_in_background(async_func, task_id: str, *args, **kwargs):
 
 
 def get_all_tasks() -> list[dict]:
+    _sync_all_from_db()
     with _lock:
         return [t.to_dict() for t in _tasks.values()]

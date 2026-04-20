@@ -144,6 +144,46 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(len(thread_conn_ids), 1)
         self.assertNotEqual(id(main_conn), thread_conn_ids[0])
 
+    def test_get_task_falls_back_to_db_when_memory_cache_misses(self):
+        task_id = tasks.create_task(task_type="campaign", campaign_id=42)
+        tasks._tasks.clear()
+
+        task = tasks.get_task(task_id)
+
+        self.assertIsNotNone(task)
+        self.assertEqual(task.task_id, task_id)
+        self.assertEqual(task.campaign_id, 42)
+
+    def test_update_task_persists_latest_progress_for_other_workers(self):
+        task_id = tasks.create_task(task_type="campaign", campaign_id=99)
+        tasks.update_task(task_id, progress=3, total=10, message="Running step 3")
+        tasks._tasks.clear()
+
+        task = tasks.get_task(task_id)
+
+        self.assertIsNotNone(task)
+        self.assertEqual(task.progress, 3)
+        self.assertEqual(task.total, 10)
+        self.assertEqual(task.message, "Running step 3")
+
+    def test_task_status_api_reads_from_db_when_memory_cache_is_empty(self):
+        config.save_settings({"onboarded": True})
+        app = create_app()
+        app.testing = True
+        client = app.test_client()
+
+        task_id = tasks.create_task(task_type="campaign", campaign_id=7)
+        tasks.update_task(task_id, progress=4, total=12, message="Still running")
+        tasks._tasks.clear()
+
+        response = client.get(f"/api/tasks/{task_id}")
+        payload = response.get_json()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(payload["task_id"], task_id)
+        self.assertEqual(payload["progress"], 4)
+        self.assertEqual(payload["message"], "Still running")
+
     def test_campaign_failure_marks_campaign_failed(self):
         campaign_id = database.insert_campaign(
             "Broken campaign",
