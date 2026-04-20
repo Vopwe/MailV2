@@ -11,6 +11,7 @@ import database
 import config
 import tasks
 from search.scraper import generate_urls_report
+from search.scraper import _normalize_tagged_urls
 from crawler.fetcher import crawl_urls
 from crawler.extractor import extract_emails
 
@@ -23,7 +24,8 @@ def _generate_for_combo(combo, urls_per_batch):
     try:
         report = generate_urls_report(niche, city, country, country_tld, count=urls_per_batch)
         rows = []
-        for url, source in report["tagged_urls"]:
+        tagged_urls = _normalize_tagged_urls(report.get("tagged_urls", []), fallback_source="unknown")
+        for url, source in tagged_urls:
             ext = tldextract.extract(url)
             domain = f"{ext.domain}.{ext.suffix}"
             rows.append({

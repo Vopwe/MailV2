@@ -25,6 +25,7 @@ from search.ai_generator import generate_ai_urls_with_meta
 from search import rotator
 from verification import verifier
 from web import create_app
+from web.routes import _campaign_runner
 from web.routes._campaign_runner import run_campaign
 
 
@@ -251,6 +252,43 @@ class RegressionTests(unittest.TestCase):
 
         self.assertEqual(len(urls), 1)
         self.assertEqual(stats["deduped_domains"], 0)
+
+    def test_generate_urls_report_tolerates_malformed_tagged_items(self):
+        from search import scraper
+
+        malformed = [
+            "https://alpha.example",
+            ("https://beta.example", "ddg", "extra"),
+            ("https://gamma.example",),
+            {"url": "https://bad.example"},
+        ]
+
+        normalized = scraper._normalize_tagged_urls(malformed)
+
+        self.assertEqual(
+            normalized,
+            [
+                ("https://alpha.example", "unknown"),
+                ("https://beta.example", "ddg"),
+                ("https://gamma.example", "unknown"),
+            ],
+        )
+
+    def test_campaign_combo_accepts_string_tagged_urls(self):
+        fake_report = {
+            "tagged_urls": ["https://alpha.example", ("https://beta.example", "ddg", "extra")],
+            "sources": {"bing": 0, "ddg": 1, "ai": 0},
+            "ai": {"status": "error", "requested_model": "", "actual_model": None, "error": "broken"},
+        }
+
+        with patch("web.routes._campaign_runner.generate_urls_report", return_value=fake_report):
+            result = _campaign_runner._generate_for_combo(("agency", "Seattle", "USA", ".com"), 5)
+
+        self.assertEqual(len(result["rows"]), 2)
+        self.assertEqual(result["rows"][0]["url"], "https://alpha.example")
+        self.assertEqual(result["rows"][0]["source"], "unknown")
+        self.assertEqual(result["rows"][1]["url"], "https://beta.example")
+        self.assertEqual(result["rows"][1]["source"], "ddg")
 
     def test_pagination_urls_preserve_structured_query_params(self):
         app = create_app()

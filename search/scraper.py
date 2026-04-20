@@ -260,6 +260,37 @@ def _filter_urls(raw_urls: list[str]) -> list[str]:
     return valid
 
 
+def _coerce_url(value) -> str | None:
+    """
+    Accept legacy/malformed result shapes and extract the URL string when possible.
+    This keeps one bad engine item from crashing the whole campaign.
+    """
+    if isinstance(value, str):
+        return value
+    if isinstance(value, (list, tuple)) and value:
+        first = value[0]
+        return first if isinstance(first, str) else None
+    return None
+
+
+def _normalize_tagged_urls(items, fallback_source: str = "unknown") -> list[tuple[str, str]]:
+    normalized = []
+    for item in items:
+        if isinstance(item, (list, tuple)):
+            if len(item) >= 2 and isinstance(item[0], str):
+                normalized.append((item[0], str(item[1] or fallback_source)))
+                continue
+            if len(item) == 1 and isinstance(item[0], str):
+                normalized.append((item[0], fallback_source))
+                continue
+        elif isinstance(item, str):
+            normalized.append((item, fallback_source))
+            continue
+
+        logger.warning("Skipping malformed tagged URL item: %r", item)
+    return normalized
+
+
 async def _scrape_bing_page(query: str, first: int = 0, mkt: str = "en-US", cc: str = "US") -> tuple[list[str], bool]:
     """
     Scrape a single Bing search results page.
@@ -455,28 +486,40 @@ def generate_urls(niche: str, city: str, country: str, country_tld: str = ".com"
     seen_domains = set()
 
     # DDG first (reliable from EU), then AI, then Bing
-    for url in ddg_urls:
+    for raw_url in ddg_urls:
+        url = _coerce_url(raw_url)
+        if not url:
+            logger.warning("Skipping malformed DDG URL item: %r", raw_url)
+            continue
         ext = tldextract.extract(url)
         domain = f"{ext.domain}.{ext.suffix}"
         if domain not in seen_domains and domain not in SKIP_DOMAINS:
             seen_domains.add(domain)
             tagged.append((url, "ddg"))
 
-    for url in ai_urls:
+    for raw_url in ai_urls:
+        url = _coerce_url(raw_url)
+        if not url:
+            logger.warning("Skipping malformed AI URL item: %r", raw_url)
+            continue
         ext = tldextract.extract(url)
         domain = f"{ext.domain}.{ext.suffix}"
         if domain not in seen_domains and domain not in SKIP_DOMAINS:
             seen_domains.add(domain)
             tagged.append((url, "ai"))
 
-    for url in _filter_urls(bing_urls):
+    for raw_url in _filter_urls(bing_urls):
+        url = _coerce_url(raw_url)
+        if not url:
+            logger.warning("Skipping malformed Bing URL item: %r", raw_url)
+            continue
         ext = tldextract.extract(url)
         domain = f"{ext.domain}.{ext.suffix}"
         if domain not in seen_domains:
             seen_domains.add(domain)
             tagged.append((url, "bing"))
 
-    result = tagged[:count]
+    result = _normalize_tagged_urls(tagged[:count], fallback_source="unknown")
     bing_count = sum(1 for _, s in result if s == "bing")
     ddg_count = sum(1 for _, s in result if s == "ddg")
     ai_count = sum(1 for _, s in result if s == "ai")
@@ -574,28 +617,40 @@ def generate_urls_report(niche: str, city: str, country: str, country_tld: str =
     tagged = []
     seen_domains = set()
 
-    for url in ddg_urls:
+    for raw_url in ddg_urls:
+        url = _coerce_url(raw_url)
+        if not url:
+            logger.warning("Skipping malformed DDG URL item in report: %r", raw_url)
+            continue
         ext = tldextract.extract(url)
         domain = f"{ext.domain}.{ext.suffix}"
         if domain not in seen_domains and domain not in SKIP_DOMAINS:
             seen_domains.add(domain)
             tagged.append((url, "ddg"))
 
-    for url in ai_urls:
+    for raw_url in ai_urls:
+        url = _coerce_url(raw_url)
+        if not url:
+            logger.warning("Skipping malformed AI URL item in report: %r", raw_url)
+            continue
         ext = tldextract.extract(url)
         domain = f"{ext.domain}.{ext.suffix}"
         if domain not in seen_domains and domain not in SKIP_DOMAINS:
             seen_domains.add(domain)
             tagged.append((url, "ai"))
 
-    for url in _filter_urls(bing_urls):
+    for raw_url in _filter_urls(bing_urls):
+        url = _coerce_url(raw_url)
+        if not url:
+            logger.warning("Skipping malformed Bing URL item in report: %r", raw_url)
+            continue
         ext = tldextract.extract(url)
         domain = f"{ext.domain}.{ext.suffix}"
         if domain not in seen_domains:
             seen_domains.add(domain)
             tagged.append((url, "bing"))
 
-    result = tagged[:count]
+    result = _normalize_tagged_urls(tagged[:count], fallback_source="unknown")
     source_counts = {
         "bing": sum(1 for _, source in result if source == "bing"),
         "ddg": sum(1 for _, source in result if source == "ddg"),
