@@ -25,10 +25,13 @@ DEAD_IP_RETRY_SECONDS = 60
 HEALTH_CACHE_SECONDS = 300
 HEALTHCHECK_TIMEOUT_SECONDS = 2.5
 PROBE_SUCCESS_BONUS = 0.25
-SEARCH_SUCCESS_BONUS_MAX = 4.0
+SEARCH_SUCCESS_BONUS_MAX = 1.25
 EMPTY_RESULT_PENALTY = 1.5
 UNHEALTHY_PENALTY = 3.0
 COOLDOWN_PENALTY = 4.0
+RECENT_USE_WINDOW_SECONDS = 20
+RECENT_USE_PENALTY = 1.25
+SCORE_TIE_MARGIN = 0.2
 HEALTHCHECK_HOSTS = (
     "www.bing.com",
     "html.duckduckgo.com",
@@ -222,7 +225,14 @@ def get_next_ip() -> str | None:
         ranked = sorted(
             available,
             key=lambda candidate: (
-                -float(_ip_stats[candidate]["score"]),
+                -(
+                    float(_ip_stats[candidate]["score"])
+                    - (
+                        RECENT_USE_PENALTY
+                        if now - float(_ip_stats[candidate]["last_used"]) < RECENT_USE_WINDOW_SECONDS
+                        else 0.0
+                    )
+                ),
                 float(_ip_stats[candidate]["last_used"]),
                 -float(_ip_stats[candidate]["last_success_at"]),
                 int(_ip_stats[candidate]["failures"]),
@@ -231,8 +241,26 @@ def get_next_ip() -> str | None:
             ),
         )
         start_index = _index % len(ranked)
-        best_score = float(_ip_stats[ranked[0]]["score"])
-        candidates = [ip for ip in ranked if float(_ip_stats[ip]["score"]) == best_score]
+        best_score = (
+            float(_ip_stats[ranked[0]]["score"])
+            - (
+                RECENT_USE_PENALTY
+                if now - float(_ip_stats[ranked[0]]["last_used"]) < RECENT_USE_WINDOW_SECONDS
+                else 0.0
+            )
+        )
+        candidates = [
+            ip
+            for ip in ranked
+            if (
+                float(_ip_stats[ip]["score"])
+                - (
+                    RECENT_USE_PENALTY
+                    if now - float(_ip_stats[ip]["last_used"]) < RECENT_USE_WINDOW_SECONDS
+                    else 0.0
+                )
+            ) >= best_score - SCORE_TIE_MARGIN
+        ]
         ip = candidates[start_index % len(candidates)] if candidates else ranked[0]
         _ensure_ip_stats(ip)["last_used"] = now
         _index += 1

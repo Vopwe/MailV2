@@ -943,6 +943,30 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(status["ranked_ips"][1]["ip"], "2001:db8::10")
         self.assertEqual(status["cooled_down_ips"], 0)
 
+    def test_rotator_does_not_stick_to_single_recent_winner(self):
+        rotator._index = 0
+        rotator._cooldowns.clear()
+        rotator._health_cache.clear()
+        rotator._ip_stats.clear()
+
+        with patch("search.rotator.config.get_setting", side_effect=lambda key, default=None: {
+            "search_ip_rotation_enabled": True,
+            "outbound_ips": ["2001:db8::21", "2001:db8::22", "2001:db8::23"],
+        }.get(key, default)):
+            rotator.record_ip_healthy("2001:db8::21")
+            rotator.record_ip_healthy("2001:db8::22")
+            rotator.record_ip_healthy("2001:db8::23")
+            rotator.record_ip_healthy("2001:db8::21", result_count=5)
+
+            first = rotator.get_next_ip()
+            second = rotator.get_next_ip()
+            third = rotator.get_next_ip()
+
+        self.assertEqual(first, "2001:db8::21")
+        self.assertIn(second, {"2001:db8::22", "2001:db8::23"})
+        self.assertNotEqual(second, first)
+        self.assertIn(third, {"2001:db8::21", "2001:db8::22", "2001:db8::23"})
+
     def test_bing_bound_ip_falls_back_to_default_route_and_marks_ip_unhealthy(self):
         from search import scraper
 
