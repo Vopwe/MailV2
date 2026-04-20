@@ -168,6 +168,32 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(task.total, 10)
         self.assertEqual(task.message, "Running step 3")
 
+    def test_complete_task_marks_progress_fully_done(self):
+        task_id = tasks.create_task(task_type="campaign", campaign_id=55)
+        tasks.update_task(task_id, progress=350, total=1000, message="Crawling")
+
+        tasks.complete_task(task_id, "Done")
+
+        task = tasks.get_task(task_id)
+        self.assertIsNotNone(task)
+        self.assertEqual(task.status, "completed")
+        self.assertEqual(task.progress, 1000)
+        self.assertEqual(task.total, 1000)
+        self.assertEqual(task.to_dict()["percent"], 100)
+
+    def test_cancelled_task_marks_progress_fully_done(self):
+        task_id = tasks.create_task(task_type="campaign", campaign_id=56)
+        tasks.update_task(task_id, progress=350, total=1000, message="Crawling")
+
+        tasks.mark_cancelled(task_id, "Cancelled")
+
+        task = tasks.get_task(task_id)
+        self.assertIsNotNone(task)
+        self.assertEqual(task.status, "cancelled")
+        self.assertEqual(task.progress, 1000)
+        self.assertEqual(task.total, 1000)
+        self.assertEqual(task.to_dict()["percent"], 100)
+
     def test_task_status_api_reads_from_db_when_memory_cache_is_empty(self):
         config.save_settings({"onboarded": True})
         app = create_app()

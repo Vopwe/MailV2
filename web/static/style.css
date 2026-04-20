@@ -583,6 +583,7 @@ a:hover {
 .badge-pending { background: #F3F4F6; color: #6B7280; }
 .badge-generating { background: #DBEAFE; color: #2563EB; }
 .badge-crawling { background: #FEF3C7; color: #D97706; }
+.badge-extracting { background: #FCE7F3; color: #BE185D; }
 .badge-crawled { background: #D1FAE5; color: #059669; }
 .badge-done { background: #D1FAE5; color: #059669; }
 .badge-failed { background: #FEE2E2; color: #DC2626; }

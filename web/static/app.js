@@ -72,7 +72,7 @@ function pollTasks() {
     }
 
     const progressEta = document.getElementById('progress-eta');
-    const startedAt = progressSection.dataset.startedAt || '';
+    let startedAt = progressSection.dataset.startedAt || '';
 
     function computeEta(percent, task) {
         if (!task || task.status !== 'running') return '';
@@ -131,6 +131,8 @@ function pollTasks() {
 
         taskId = task.task_id || taskId;
         progressSection.dataset.taskId = taskId;
+        startedAt = task.started_at || startedAt;
+        progressSection.dataset.startedAt = startedAt;
 
         if (task.status === 'failed') {
             setStatus('failed');
@@ -158,7 +160,7 @@ function pollTasks() {
         } else if (task.message && task.message.startsWith('Crawling URLs')) {
             status = 'crawling';
         } else if (task.message && task.message.startsWith('Extracting Emails')) {
-            status = 'crawling';
+            status = 'extracting';
         }
         setStatus(status);
         setProgress(task.percent || 0, task.message || 'Running...', task);

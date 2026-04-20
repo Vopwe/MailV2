@@ -256,6 +256,8 @@ def complete_task(task_id: str, message: str = "Done"):
         task = _tasks.get(task_id)
         if task:
             task.status = "completed"
+            if task.total > 0:
+                task.progress = task.total
             task.message = message
             task.completed_at = _now_iso()
             task.updated_at = task.completed_at
@@ -285,6 +287,8 @@ def mark_cancelled(task_id: str, message: str = "Cancelled by user"):
         task = _tasks.get(task_id)
         if task:
             task.status = "cancelled"
+            if task.total > 0:
+                task.progress = task.total
             task.message = message
             task.completed_at = _now_iso()
             task.updated_at = task.completed_at
