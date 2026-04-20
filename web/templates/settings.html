@@ -157,6 +157,15 @@
             <div class="settings-section-title">Outbound IPs</div>
             <div class="form-row">
               <div class="form-group" style="flex:1 1 100%;">
+                <label style="display:flex; align-items:center; gap:10px;">
+                  <input type="checkbox" name="search_ip_rotation_enabled" value="1" {% if settings.get('search_ip_rotation_enabled') %}checked{% endif %}>
+                  <span>Enable Search IP Rotation</span>
+                </label>
+                <span class="hint">Off by default. Keep disabled while troubleshooting. When off, Bing and DuckDuckGo use the server default route even if IPs are saved below.</span>
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-group" style="flex:1 1 100%;">
                 <label for="outbound_ips">One per line (IPv4 / IPv6)</label>
                 <textarea id="outbound_ips" name="outbound_ips" rows="8" placeholder="192.168.1.100&#10;2001:db8::1">{% if settings.outbound_ips %}{% for ip in settings.outbound_ips %}{{ ip }}{% if not loop.last %}
 {% endif %}{% endfor %}{% endif %}</textarea>
@@ -167,7 +176,9 @@
             <div class="form-row">
               <div class="form-group" style="flex:1 1 100%;">
                 <label>Status</label>
-                {% if ip_status.total_ips == 0 %}
+                {% if not ip_status.enabled %}
+                <div style="padding:10px 12px; background:#F3F4F6; color:#374151; border-radius:4px; font-size:13px;">Rotation disabled - search uses the server default route.</div>
+                {% elif ip_status.total_ips == 0 %}
                 <div style="padding:10px 12px; background:#FEF3C7; color:#92400E; border-radius:4px; font-size:13px;">⚠ No IPs configured — using server default IP.</div>
                 {% elif ip_status.available_ips > 0 %}
                 <div style="padding:10px 12px; background:#D1FAE5; color:#065F46; border-radius:4px; font-size:13px;">✓ {{ ip_status.available_ips }} of {{ ip_status.total_ips }} IPs active — rotation working.</div>

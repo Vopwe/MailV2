@@ -92,6 +92,7 @@ def index():
             "bing_delay_min": float(request.form.get("bing_delay_min", 2.0)),
             "bing_delay_max": float(request.form.get("bing_delay_max", 5.0)),
             "bing_results_per_page": int(request.form.get("bing_results_per_page", 50)),
+            "search_ip_rotation_enabled": request.form.get("search_ip_rotation_enabled") == "1",
             "ddg_concurrency": int(request.form.get("ddg_concurrency", 5)),
             "ddg_delay_min": float(request.form.get("ddg_delay_min", 1.0)),
             "ddg_delay_max": float(request.form.get("ddg_delay_max", 3.0)),
@@ -142,6 +143,7 @@ def index():
 
     # Get IP rotator status
     ip_status = {
+        "enabled": bool(settings.get("search_ip_rotation_enabled", False)),
         "total_ips": 0,
         "available_ips": 0,
         "cooled_down_ips": 0,

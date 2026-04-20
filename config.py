@@ -32,6 +32,7 @@ BING_CONCURRENCY = 5
 BING_DELAY_MIN = 2.0
 BING_DELAY_MAX = 5.0
 BING_RESULTS_PER_PAGE = 50
+SEARCH_IP_ROTATION_ENABLED = False
 OUTBOUND_IPS = []  # Configured via settings.json or ips.txt
 
 # ─── DDG Scraper Defaults ────────────────────────────────────────────
@@ -203,6 +204,7 @@ def get_all_settings() -> dict:
         "bing_delay_min": BING_DELAY_MIN,
         "bing_delay_max": BING_DELAY_MAX,
         "bing_results_per_page": BING_RESULTS_PER_PAGE,
+        "search_ip_rotation_enabled": SEARCH_IP_ROTATION_ENABLED,
         "ddg_concurrency": DDG_CONCURRENCY,
         "ddg_delay_min": DDG_DELAY_MIN,
         "ddg_delay_max": DDG_DELAY_MAX,

@@ -137,6 +137,9 @@ def _is_ip_ready(ip: str, now: float) -> bool:
 
 def get_available_ips() -> list[str]:
     """Return healthy configured IPs. Empty list means use default route."""
+    if not config.get_setting("search_ip_rotation_enabled", False):
+        return []
+
     all_ips = _load_ips()
     if not all_ips:
         return []
@@ -200,6 +203,7 @@ def get_status() -> dict:
             if not healthy and expires_at >= now
         ]
     return {
+        "enabled": bool(config.get_setting("search_ip_rotation_enabled", False)),
         "total_ips": len(all_ips),
         "available_ips": max(len(all_ips) - len(cooled) - len(unhealthy), 0),
         "cooled_down_ips": len(cooled),

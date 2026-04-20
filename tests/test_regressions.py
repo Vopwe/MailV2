@@ -748,6 +748,22 @@ class RegressionTests(unittest.TestCase):
         self.assertFalse(rotator._get_cached_health("2001:db8::1"))
         self.assertTrue(rotator._get_cached_health("2001:db8::2"))
 
+    def test_rotator_uses_default_route_when_rotation_disabled(self):
+        rotator._index = 0
+        rotator._cooldowns.clear()
+        rotator._health_cache.clear()
+
+        with patch("search.rotator.config.get_setting", side_effect=lambda key, default=None: {
+            "search_ip_rotation_enabled": False,
+            "outbound_ips": ["2001:db8::1", "2001:db8::2"],
+        }.get(key, default)):
+            self.assertEqual(rotator.get_available_ips(), [])
+            self.assertIsNone(rotator.get_next_ip())
+            status = rotator.get_status()
+
+        self.assertFalse(status["enabled"])
+        self.assertEqual(status["total_ips"], 2)
+
     def test_bing_bound_ip_falls_back_to_default_route_and_marks_ip_unhealthy(self):
         from search import scraper
 
@@ -884,7 +900,32 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn('name="smtp_ehlo_hostname"', html)
         self.assertIn('name="smtp_mail_from"', html)
+        self.assertIn('name="search_ip_rotation_enabled"', html)
         self.assertIn("Verifier SMTP identity is using automatic fallbacks", html)
+
+    def test_admin_can_save_search_ip_rotation_toggle(self):
+        config.save_settings({"onboarded": True})
+        app = create_app()
+        app.testing = True
+        app.config["WTF_CSRF_ENABLED"] = False
+        client = app.test_client()
+
+        with client.session_transaction() as session_state:
+            session_state["authenticated"] = True
+            session_state["is_admin"] = True
+
+        response = client.post(
+            "/settings/",
+            data={
+                "search_ip_rotation_enabled": "1",
+                "outbound_ips": "2001:db8::1\n2001:db8::2",
+            },
+            follow_redirects=False,
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(config.get_setting("search_ip_rotation_enabled", False))
+        self.assertEqual(config.get_setting("outbound_ips", []), ["2001:db8::1", "2001:db8::2"])
 
     def test_onboarding_password_creation_grants_admin_session(self):
         app = create_app()
