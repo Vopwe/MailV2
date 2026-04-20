@@ -149,9 +149,8 @@ async def _run_campaign_steps(task_id: str, campaign_id: int, campaign: dict):
                     message=f"[{completed}/{total_combos}] Scraped: {niche} in {city}, {country}",
                 )
 
-    # Cross-campaign domain dedup: remove URLs already crawled elsewhere
     deduped_count = 0
-    if all_url_rows:
+    if all_url_rows and config.get_setting("dedup_across_campaigns", False):
         existing_domains = database.get_existing_domains(exclude_campaign_id=campaign_id)
         before = len(all_url_rows)
         all_url_rows = [r for r in all_url_rows if r["domain"] not in existing_domains]
@@ -230,14 +229,19 @@ async def _run_campaign_steps(task_id: str, campaign_id: int, campaign: dict):
     database.update_campaign_status(campaign_id, "done")
 
     # Build detailed completion message
-    msg = (
-        f"Done! {total_extracted} emails from {len(pending_urls)} URLs. "
-        f"Reachable: {crawl_stats['domains_reachable']}/{crawl_stats['domains_total']} | "
-        f"Pages: {crawl_stats['pages_fetched']} fetched, {crawl_stats['pages_failed']} failed | "
-        f"Domains with emails: {domains_with_emails}"
-    )
+    if not pending_urls:
+        msg = "Done! No URLs were queued for crawling."
+    else:
+        msg = (
+            f"Done! {total_extracted} emails from {len(pending_urls)} URLs. "
+            f"Reachable: {crawl_stats['domains_reachable']}/{crawl_stats['domains_total']} | "
+            f"Pages: {crawl_stats['pages_fetched']} fetched, {crawl_stats['pages_failed']} failed | "
+            f"Domains with emails: {domains_with_emails}"
+        )
     if crawl_stats['pages_robots_blocked'] > 0:
         msg += f" | robots.txt blocked: {crawl_stats['pages_robots_blocked']}"
+    if deduped_count:
+        msg += f" | skipped duplicates: {deduped_count}"
 
     tasks.complete_task(task_id, msg)
 

@@ -201,6 +201,57 @@ class RegressionTests(unittest.TestCase):
         campaign = database.get_campaign(campaign_id)
         self.assertEqual(campaign["status"], "failed")
 
+    def test_campaign_does_not_dedup_domains_from_other_campaigns_by_default(self):
+        campaign_id = database.insert_campaign(
+            "Repeat domain campaign",
+            ["agency"],
+            ["USA"],
+            ["Seattle"],
+        )
+        other_campaign_id = database.insert_campaign(
+            "Older campaign",
+            ["agency"],
+            ["USA"],
+            ["Seattle"],
+        )
+        database.insert_urls([
+            {
+                "campaign_id": other_campaign_id,
+                "url": "https://example.com/contact",
+                "domain": "example.com",
+                "niche": "agency",
+                "city": "Seattle",
+                "country": "USA",
+                "source": "bing",
+            }
+        ])
+
+        task_id = tasks.create_task("campaign", campaign_id=campaign_id)
+        fake_report = {
+            "tagged_urls": [("https://example.com/contact", "bing")],
+            "sources": {"bing": 1, "ddg": 0, "ai": 0},
+            "ai": {"status": "disabled", "requested_model": None, "actual_model": None, "error": None},
+        }
+        fake_stats = {
+            "domains_reachable": 1,
+            "domains_total": 1,
+            "pages_fetched": 1,
+            "pages_failed": 0,
+            "pages_discovered": 0,
+            "pages_robots_blocked": 0,
+        }
+
+        with patch("web.routes._campaign_runner.config.get_locations", return_value={"USA": {"tld": ".com", "cities": ["Seattle"]}}), \
+             patch("web.routes._campaign_runner.generate_urls_report", return_value=fake_report), \
+             patch("web.routes._campaign_runner.crawl_urls", new=AsyncMock(return_value=({}, fake_stats))):
+            asyncio.run(run_campaign(task_id, campaign_id))
+
+        urls = database.get_urls(campaign_id)
+        stats = database.get_campaign_stats(campaign_id)
+
+        self.assertEqual(len(urls), 1)
+        self.assertEqual(stats["deduped_domains"], 0)
+
     def test_pagination_urls_preserve_structured_query_params(self):
         app = create_app()
         app.testing = True

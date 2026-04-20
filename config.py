@@ -213,6 +213,7 @@ def get_all_settings() -> dict:
         "crawl_delay": CRAWL_DELAY,
         "max_pages_per_domain": MAX_PAGES_PER_DOMAIN,
         "urls_per_batch": URLS_PER_BATCH,
+        "dedup_across_campaigns": False,
         "verify_timeout": VERIFY_TIMEOUT,
         "smtp_ehlo_hostname": "",
         "smtp_mail_from": "",
