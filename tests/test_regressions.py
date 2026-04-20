@@ -290,6 +290,28 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(result["rows"][1]["url"], "https://beta.example")
         self.assertEqual(result["rows"][1]["source"], "ddg")
 
+    def test_campaign_combo_falls_back_to_ai_when_search_returns_zero_urls(self):
+        fake_report = {
+            "tagged_urls": [],
+            "sources": {"bing": 0, "ddg": 0, "ai": 0},
+            "ai": {"status": "error", "requested_model": "", "actual_model": None, "error": "no search urls"},
+        }
+        ai_result = {
+            "urls": ["https://fallback-one.example", "https://fallback-two.example"],
+            "status": "ok",
+            "requested_model": "openrouter/free",
+            "actual_model": "openrouter/free",
+            "error": None,
+        }
+
+        with patch("web.routes._campaign_runner.generate_urls_report", return_value=fake_report), \
+             patch("web.routes._campaign_runner.generate_ai_urls_with_meta", new=AsyncMock(return_value=ai_result)):
+            result = _campaign_runner._generate_for_combo(("agency", "Seattle", "USA", ".com"), 5)
+
+        self.assertEqual(len(result["rows"]), 2)
+        self.assertEqual(result["rows"][0]["source"], "ai")
+        self.assertEqual(result["report"]["sources"]["ai"], 2)
+
     def test_pagination_urls_preserve_structured_query_params(self):
         app = create_app()
         app.testing = True
@@ -725,6 +747,106 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(attempts, ["2001:db8::1", "2001:db8::2"])
         self.assertFalse(rotator._get_cached_health("2001:db8::1"))
         self.assertTrue(rotator._get_cached_health("2001:db8::2"))
+
+    def test_bing_bound_ip_falls_back_to_default_route_and_marks_ip_unhealthy(self):
+        from search import scraper
+
+        class _Response:
+            def __init__(self, status_code=200, text=""):
+                self.status_code = status_code
+                self.text = text
+
+        class _ClientStub:
+            def __init__(self, responses):
+                self._responses = list(responses)
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb):
+                return False
+
+            async def get(self, *args, **kwargs):
+                response = self._responses.pop(0)
+                if isinstance(response, Exception):
+                    raise response
+                return response
+
+        client_calls = []
+        clients = [
+            _ClientStub([_Response(200, text="BOUND")]),
+            _ClientStub([_Response(200, text="DEFAULT")]),
+        ]
+
+        def fake_async_client(*args, **kwargs):
+            client_calls.append(kwargs.get("transport"))
+            return clients.pop(0)
+
+        def fake_get_setting(_key, default=None):
+            return default
+
+        with patch("search.scraper.get_next_ip", return_value="2001:db8::9"), \
+             patch("search.scraper.httpx.AsyncHTTPTransport", side_effect=lambda local_address=None: {"local_address": local_address}), \
+             patch("search.scraper.httpx.AsyncClient", side_effect=fake_async_client), \
+             patch("search.scraper._is_captcha_response", return_value=False), \
+             patch("search.scraper._parse_bing_results", side_effect=lambda html: [] if html == "BOUND" else ["https://example.com"]), \
+             patch("search.scraper.config.get_setting", side_effect=fake_get_setting), \
+             patch("search.scraper.asyncio.sleep", new=AsyncMock()), \
+             patch("search.scraper.mark_ip_unhealthy") as mark_ip_unhealthy:
+            urls, was_blocked = asyncio.run(scraper._scrape_bing_page("agency seattle"))
+
+        self.assertEqual(urls, ["https://example.com"])
+        self.assertFalse(was_blocked)
+        self.assertIsNotNone(client_calls[0])
+        self.assertIsNone(client_calls[1])
+        mark_ip_unhealthy.assert_called_once_with("2001:db8::9", "0 parsed URLs while default route recovered")
+
+    def test_ddg_bound_ip_falls_back_to_default_route_and_marks_ip_unhealthy(self):
+        from search import duckduckgo
+
+        class _Response:
+            def __init__(self, status_code=200, text=""):
+                self.status_code = status_code
+                self.text = text
+
+        class _ClientStub:
+            def __init__(self, responses):
+                self._responses = list(responses)
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb):
+                return False
+
+            async def post(self, *args, **kwargs):
+                response = self._responses.pop(0)
+                if isinstance(response, Exception):
+                    raise response
+                return response
+
+        client_calls = []
+        clients = [
+            _ClientStub([_Response(500, text="BOUND")]),
+            _ClientStub([_Response(200, text="DEFAULT")]),
+        ]
+
+        def fake_async_client(*args, **kwargs):
+            client_calls.append(kwargs.get("transport"))
+            return clients.pop(0)
+
+        with patch("search.rotator.get_next_ip", return_value="2001:db8::10"), \
+             patch("search.duckduckgo.httpx.AsyncHTTPTransport", side_effect=lambda local_address=None: {"local_address": local_address}), \
+             patch("search.duckduckgo.httpx.AsyncClient", side_effect=fake_async_client), \
+             patch("search.duckduckgo._parse_ddg_results", side_effect=lambda html: ["https://example.com"] if html == "DEFAULT" else []), \
+             patch("search.duckduckgo.asyncio.sleep", new=AsyncMock()), \
+             patch("search.rotator.mark_ip_unhealthy") as mark_ip_unhealthy:
+            urls = asyncio.run(duckduckgo._scrape_ddg_page("agency seattle"))
+
+        self.assertEqual(urls, ["https://example.com"])
+        self.assertIsNotNone(client_calls[0])
+        self.assertIsNone(client_calls[1])
+        mark_ip_unhealthy.assert_called_once_with("2001:db8::10", "HTTP 500")
 
     def test_verifier_uses_configured_ipv6_safe_identity(self):
         verifier.clear_mx_cache()

@@ -3,6 +3,7 @@ Campaign execution logic — runs in background thread.
 V2: Uses Bing scraper for URL generation instead of AI.
 Parallel Bing scraping + async crawling.
 """
+import asyncio
 import logging
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -12,10 +13,45 @@ import config
 import tasks
 from search.scraper import generate_urls_report
 from search.scraper import _normalize_tagged_urls
+from search.ai_generator import generate_ai_urls_with_meta
 from crawler.fetcher import crawl_urls
 from crawler.extractor import extract_emails
 
 logger = logging.getLogger(__name__)
+
+
+def _run_async_in_thread(coro):
+    """Run async helper from worker thread regardless of event-loop state."""
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coro)
+
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(coro)
+    finally:
+        loop.close()
+
+
+def _fallback_ai_report(niche: str, city: str, country: str, count: int) -> dict:
+    """V1-style safety net: if search scraping yields nothing, ask AI directly."""
+    result = _run_async_in_thread(generate_ai_urls_with_meta(niche, city, country, count=count))
+    tagged_urls = [(url, "ai") for url in result.get("urls", [])]
+    return {
+        "tagged_urls": tagged_urls,
+        "sources": {
+            "bing": 0,
+            "ddg": 0,
+            "ai": len(tagged_urls),
+        },
+        "ai": {
+            "status": result.get("status", "error"),
+            "requested_model": result.get("requested_model"),
+            "actual_model": result.get("actual_model"),
+            "error": result.get("error"),
+        },
+    }
 
 
 def _generate_for_combo(combo, urls_per_batch):
@@ -23,8 +59,16 @@ def _generate_for_combo(combo, urls_per_batch):
     niche, city, country, country_tld = combo
     try:
         report = generate_urls_report(niche, city, country, country_tld, count=urls_per_batch)
-        rows = []
         tagged_urls = _normalize_tagged_urls(report.get("tagged_urls", []), fallback_source="unknown")
+        if not tagged_urls:
+            logger.warning(
+                "Search URL generation returned 0 rows for %s/%s/%s, falling back to AI-only generator",
+                niche, city, country,
+            )
+            report = _fallback_ai_report(niche, city, country, urls_per_batch)
+            tagged_urls = _normalize_tagged_urls(report.get("tagged_urls", []), fallback_source="unknown")
+
+        rows = []
         for url, source in tagged_urls:
             ext = tldextract.extract(url)
             domain = f"{ext.domain}.{ext.suffix}"
@@ -42,6 +86,34 @@ def _generate_for_combo(combo, urls_per_batch):
         }
     except Exception as e:
         logger.error(f"URL generation failed for {niche}/{city}/{country}: {e}")
+        try:
+            report = _fallback_ai_report(niche, city, country, urls_per_batch)
+            rows = []
+            for url, source in _normalize_tagged_urls(report.get("tagged_urls", []), fallback_source="unknown"):
+                ext = tldextract.extract(url)
+                domain = f"{ext.domain}.{ext.suffix}"
+                rows.append({
+                    "url": url,
+                    "domain": domain,
+                    "niche": niche,
+                    "city": city,
+                    "country": country,
+                    "source": source,
+                })
+            if rows:
+                logger.info(
+                    "AI-only fallback recovered combo %s/%s/%s with %s URLs",
+                    niche, city, country, len(rows),
+                )
+                return {
+                    "rows": rows,
+                    "report": report,
+                }
+        except Exception as fallback_error:
+            logger.error(
+                "AI-only fallback also failed for %s/%s/%s: %s",
+                niche, city, country, fallback_error,
+            )
         return {
             "rows": [],
             "report": {

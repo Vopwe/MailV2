@@ -47,6 +47,7 @@ CAPTCHA_PATTERNS = [
 ]
 
 BING_SEARCH_URL = "https://www.bing.com/search"
+_AUTO_IP = object()
 
 # Map country names to Bing market codes.
 # This overrides Bing's IP-based geo-detection so European VPS IPs
@@ -291,12 +292,20 @@ def _normalize_tagged_urls(items, fallback_source: str = "unknown") -> list[tupl
     return normalized
 
 
-async def _scrape_bing_page(query: str, first: int = 0, mkt: str = "en-US", cc: str = "US") -> tuple[list[str], bool]:
+async def _scrape_bing_page(
+    query: str,
+    first: int = 0,
+    mkt: str = "en-US",
+    cc: str = "US",
+    ip=_AUTO_IP,
+    allow_default_retry: bool = True,
+) -> tuple[list[str], bool]:
     """
     Scrape a single Bing search results page.
     Returns (urls, was_blocked).
     """
-    ip = get_next_ip()
+    if ip is _AUTO_IP:
+        ip = get_next_ip()
     delay_min = float(config.get_setting("bing_delay_min", config.BING_DELAY_MIN))
     delay_max = float(config.get_setting("bing_delay_max", config.BING_DELAY_MAX))
 
@@ -349,10 +358,21 @@ async def _scrape_bing_page(query: str, first: int = 0, mkt: str = "en-US", cc: 
                 logger.warning(f"Bing 429 rate limit on IP {ip}")
                 if ip:
                     cooldown_ip(ip)
+                    if allow_default_retry:
+                        logger.warning("Retrying Bing query on default route after 429 from IP %s", ip)
+                        return await _scrape_bing_page(
+                            query, first=first, mkt=mkt, cc=cc, ip=None, allow_default_retry=False
+                        )
                 return [], True
 
             if resp.status_code != 200:
                 logger.warning(f"Bing returned {resp.status_code} for query: {query[:60]}")
+                if ip and allow_default_retry:
+                    mark_ip_unhealthy(ip, f"HTTP {resp.status_code}")
+                    logger.warning("Retrying Bing query on default route after HTTP %s from IP %s", resp.status_code, ip)
+                    return await _scrape_bing_page(
+                        query, first=first, mkt=mkt, cc=cc, ip=None, allow_default_retry=False
+                    )
                 return [], False
 
             html = resp.text
@@ -360,11 +380,24 @@ async def _scrape_bing_page(query: str, first: int = 0, mkt: str = "en-US", cc: 
                 logger.warning(f"Bing captcha detected on IP {ip}")
                 if ip:
                     cooldown_ip(ip)
+                    if allow_default_retry:
+                        logger.warning("Retrying Bing query on default route after captcha on IP %s", ip)
+                        return await _scrape_bing_page(
+                            query, first=first, mkt=mkt, cc=cc, ip=None, allow_default_retry=False
+                        )
                 return [], True
 
             if ip:
                 record_ip_healthy(ip)
             urls = _parse_bing_results(html)
+            if not urls and ip and allow_default_retry:
+                logger.warning("Retrying Bing query on default route after 0 parsed URLs from IP %s", ip)
+                fallback_urls, was_blocked = await _scrape_bing_page(
+                    query, first=first, mkt=mkt, cc=cc, ip=None, allow_default_retry=False
+                )
+                if fallback_urls:
+                    mark_ip_unhealthy(ip, "0 parsed URLs while default route recovered")
+                return fallback_urls, was_blocked
             logger.info(f"Bing via IP {ip or 'default'}: {len(urls)} results")
             return urls, False
 
@@ -372,6 +405,11 @@ async def _scrape_bing_page(query: str, first: int = 0, mkt: str = "en-US", cc: 
         logger.error(f"Bing scrape error: {e}")
         if ip:
             mark_ip_unhealthy(ip, str(e))
+            if allow_default_retry:
+                logger.warning("Retrying Bing query on default route after error from IP %s", ip)
+                return await _scrape_bing_page(
+                    query, first=first, mkt=mkt, cc=cc, ip=None, allow_default_retry=False
+                )
         return [], False
     finally:
         # Random delay between requests

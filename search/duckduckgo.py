@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 ua = UserAgent(fallback="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
 
 DDG_URL = "https://html.duckduckgo.com/html/"
+_AUTO_IP = object()
 
 # Same skip list as Bing scraper
 SKIP_DOMAINS = {
@@ -84,9 +85,12 @@ def _filter_ddg_urls(raw_urls: list[str]) -> list[str]:
     return valid
 
 
-async def _scrape_ddg_page(query: str, ip: str | None = None) -> list[str]:
+async def _scrape_ddg_page(query: str, ip=_AUTO_IP, allow_default_retry: bool = True) -> list[str]:
     """Scrape a single DDG HTML lite page. Returns list of URLs."""
-    from search.rotator import cooldown_ip, mark_ip_unhealthy, record_ip_healthy
+    from search.rotator import cooldown_ip, get_next_ip, mark_ip_unhealthy, record_ip_healthy
+
+    if ip is _AUTO_IP:
+        ip = get_next_ip()
 
     headers = {
         "User-Agent": ua.random,
@@ -120,15 +124,28 @@ async def _scrape_ddg_page(query: str, ip: str | None = None) -> list[str]:
                 logger.warning(f"DDG 429 rate limit on IP {ip or 'default'}")
                 if ip:
                     cooldown_ip(ip)
+                    if allow_default_retry:
+                        logger.warning("Retrying DDG query on default route after 429 from IP %s", ip)
+                        return await _scrape_ddg_page(query, ip=None, allow_default_retry=False)
                 return []
 
             if resp.status_code != 200:
                 logger.warning(f"DDG returned {resp.status_code} for: {query[:60]}")
+                if ip and allow_default_retry:
+                    mark_ip_unhealthy(ip, f"HTTP {resp.status_code}")
+                    logger.warning("Retrying DDG query on default route after HTTP %s from IP %s", resp.status_code, ip)
+                    return await _scrape_ddg_page(query, ip=None, allow_default_retry=False)
                 return []
 
             if ip:
                 record_ip_healthy(ip)
             urls = _parse_ddg_results(resp.text)
+            if not urls and ip and allow_default_retry:
+                logger.warning("Retrying DDG query on default route after 0 parsed URLs from IP %s", ip)
+                fallback_urls = await _scrape_ddg_page(query, ip=None, allow_default_retry=False)
+                if fallback_urls:
+                    mark_ip_unhealthy(ip, "0 parsed URLs while default route recovered")
+                return fallback_urls
             logger.info(f"DDG via IP {ip or 'default'}: {len(urls)} results")
             return urls
 
@@ -136,6 +153,9 @@ async def _scrape_ddg_page(query: str, ip: str | None = None) -> list[str]:
         logger.error(f"DDG scrape error: {e}")
         if ip:
             mark_ip_unhealthy(ip, str(e))
+            if allow_default_retry:
+                logger.warning("Retrying DDG query on default route after error from IP %s", ip)
+                return await _scrape_ddg_page(query, ip=None, allow_default_retry=False)
         return []
     finally:
         import config
@@ -149,8 +169,6 @@ async def scrape_ddg(niche: str, city: str, country: str, count: int = 40) -> li
     Scrape DuckDuckGo for business URLs.
     Returns filtered, deduplicated list of URLs.
     """
-    from search.rotator import get_next_ip
-
     queries = [
         f'{niche} in {city} {country}',
         f'{niche} {city} contact email',
@@ -166,9 +184,8 @@ async def scrape_ddg(niche: str, city: str, country: str, count: int = 40) -> li
 
     all_urls = []
     for i, q in enumerate(queries):
-        ip = get_next_ip()
         logger.info(f"DDG query [{i+1}/{len(queries)}]: {q}")
-        page_urls = await _scrape_ddg_page(q, ip=ip)
+        page_urls = await _scrape_ddg_page(q)
         all_urls.extend(page_urls)
 
         filtered = _filter_ddg_urls(all_urls)
