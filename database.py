@@ -85,6 +85,16 @@ def _ensure_email_columns(db: sqlite3.Connection):
             db.execute(ddl)
 
 
+def _ensure_task_columns(db: sqlite3.Connection):
+    columns = {row["name"] for row in db.execute("PRAGMA table_info(task_status)").fetchall()}
+    additions = {
+        "updated_at": "ALTER TABLE task_status ADD COLUMN updated_at TEXT DEFAULT ''",
+    }
+    for name, ddl in additions.items():
+        if name not in columns:
+            db.execute(ddl)
+
+
 def init_db():
     with _write_db() as db:
         db.executescript("""
@@ -113,7 +123,8 @@ def init_db():
             message      TEXT DEFAULT '',
             error        TEXT DEFAULT '',
             started_at   TEXT DEFAULT '',
-            completed_at TEXT DEFAULT ''
+            completed_at TEXT DEFAULT '',
+            updated_at   TEXT DEFAULT ''
         );
 
         CREATE TABLE IF NOT EXISTS campaigns (
@@ -175,6 +186,7 @@ def init_db():
         CREATE INDEX IF NOT EXISTS idx_emails_country ON emails(country);
     """)
         _ensure_email_columns(db)
+        _ensure_task_columns(db)
 
 
 # ── Campaign CRUD ─────────────────────────────────────────────────────
@@ -559,16 +571,17 @@ def get_verification_stats(limit: int = 5) -> list[dict]:
 def upsert_task(task_id: str, task_type: str = "", campaign_id: int | None = None,
                 status: str = "running", progress: int = 0, total: int = 0,
                 message: str = "", error: str = "", started_at: str = "",
-                completed_at: str = ""):
+                completed_at: str = "", updated_at: str = ""):
     with _write_db() as db:
         db.execute(
             """INSERT INTO task_status
-               (task_id, task_type, campaign_id, status, progress, total, message, error, started_at, completed_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+               (task_id, task_type, campaign_id, status, progress, total, message, error, started_at, completed_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT(task_id) DO UPDATE SET
                  status=excluded.status, progress=excluded.progress, total=excluded.total,
-                 message=excluded.message, error=excluded.error, completed_at=excluded.completed_at""",
-            (task_id, task_type, campaign_id, status, progress, total, message, error, started_at, completed_at),
+                 message=excluded.message, error=excluded.error, completed_at=excluded.completed_at,
+                 updated_at=excluded.updated_at""",
+            (task_id, task_type, campaign_id, status, progress, total, message, error, started_at, completed_at, updated_at),
         )
 
 

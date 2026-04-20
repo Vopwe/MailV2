@@ -93,9 +93,23 @@ def run(campaign_id):
         flash("Campaign not found.", "error")
         return redirect(url_for("campaigns.list_campaigns"))
 
-    if campaign["status"] in ("generating", "crawling"):
+    current = tasks.find_latest_task(
+        task_type="campaign",
+        campaign_id=campaign_id,
+        statuses=("running",),
+    )
+    if current:
         flash("Campaign is already running.", "warning")
         return redirect(url_for("campaigns.detail", campaign_id=campaign_id))
+
+    if campaign["status"] in ("generating", "crawling"):
+        logger.warning(
+            "Campaign %s had stale status %s with no running task; resetting to failed before rerun",
+            campaign_id,
+            campaign["status"],
+        )
+        database.update_campaign_status(campaign_id, "failed")
+        database.update_campaign_counts(campaign_id)
 
     task_id = tasks.create_task(task_type="campaign", campaign_id=campaign_id)
     tasks.run_in_background(run_campaign, task_id, campaign_id)

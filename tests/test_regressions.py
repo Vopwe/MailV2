@@ -9,6 +9,7 @@ import shutil
 import threading
 import unittest
 from contextlib import contextmanager
+from datetime import datetime, timedelta
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 import uuid
@@ -184,6 +185,47 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(payload["task_id"], task_id)
         self.assertEqual(payload["progress"], 4)
         self.assertEqual(payload["message"], "Still running")
+
+    def test_init_tasks_keeps_fresh_running_task_running(self):
+        task_id = tasks.create_task(task_type="campaign", campaign_id=77)
+        tasks._tasks.clear()
+
+        tasks.init_tasks()
+
+        task = tasks.get_task(task_id)
+        self.assertIsNotNone(task)
+        self.assertEqual(task.status, "running")
+        self.assertEqual(task.error, "")
+
+    def test_init_tasks_marks_only_stale_running_task_failed_and_updates_campaign(self):
+        campaign_id = database.insert_campaign(
+            "Restarted campaign",
+            ["agency"],
+            ["USA"],
+            ["Seattle"],
+        )
+        database.update_campaign_status(campaign_id, "generating")
+        stale_time = (datetime.now() - timedelta(seconds=tasks.STALE_TASK_SECONDS + 30)).isoformat()
+        database.upsert_task(
+            task_id="stalecase123",
+            task_type="campaign",
+            campaign_id=campaign_id,
+            status="running",
+            progress=10,
+            total=50,
+            started_at=stale_time,
+            updated_at=stale_time,
+        )
+        tasks._tasks.clear()
+
+        tasks.init_tasks()
+
+        task = tasks.get_task("stalecase123")
+        campaign = database.get_campaign(campaign_id)
+        self.assertIsNotNone(task)
+        self.assertEqual(task.status, "failed")
+        self.assertEqual(task.error, "Server restarted during task")
+        self.assertEqual(campaign["status"], "failed")
 
     def test_campaign_failure_marks_campaign_failed(self):
         campaign_id = database.insert_campaign(
@@ -424,8 +466,10 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
 
     def test_campaign_run_redirects_with_task_for_detail_polling(self):
+        config.save_settings({"onboarded": True})
         app = create_app()
         app.testing = True
+        app.config["WTF_CSRF_ENABLED"] = False
         client = app.test_client()
         campaign_id = database.insert_campaign("Live progress", ["agency"], ["USA"], ["Seattle"])
 
@@ -436,6 +480,24 @@ class RegressionTests(unittest.TestCase):
         location = response.headers["Location"]
         self.assertIn(f"/campaigns/{campaign_id}", location)
         self.assertIn("campaign_task=", location)
+        run_in_background.assert_called_once()
+
+    def test_campaign_run_resets_stale_generating_status_when_no_running_task(self):
+        config.save_settings({"onboarded": True})
+        app = create_app()
+        app.testing = True
+        app.config["WTF_CSRF_ENABLED"] = False
+        client = app.test_client()
+        campaign_id = database.insert_campaign("Retry me", ["agency"], ["USA"], ["Seattle"])
+        database.update_campaign_status(campaign_id, "generating")
+
+        with patch("web.routes.campaigns.tasks.find_latest_task", return_value=None), \
+             patch("web.routes.campaigns.tasks.run_in_background") as run_in_background:
+            response = client.post(f"/campaigns/{campaign_id}/run", follow_redirects=False)
+
+        campaign = database.get_campaign(campaign_id)
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(campaign["status"], "failed")
         run_in_background.assert_called_once()
 
     def test_smtp_probe_tries_multiple_hosts_before_reporting_unavailable(self):

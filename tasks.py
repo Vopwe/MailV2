@@ -6,7 +6,7 @@ import threading
 import asyncio
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 
 
 @dataclass
@@ -21,6 +21,7 @@ class TaskStatus:
     error: str = ""
     started_at: str = ""
     completed_at: str = ""
+    updated_at: str = ""
     cancel_requested: bool = False
 
     def to_dict(self) -> dict:
@@ -36,6 +37,7 @@ class TaskStatus:
             "percent": round((self.progress / self.total * 100) if self.total > 0 else 0),
             "started_at": self.started_at,
             "completed_at": self.completed_at,
+            "updated_at": self.updated_at,
             "cancel_requested": self.cancel_requested,
         }
 
@@ -43,6 +45,11 @@ class TaskStatus:
 # In-memory cache (fast reads); DB is source of truth
 _tasks: dict[str, TaskStatus] = {}
 _lock = threading.Lock()
+STALE_TASK_SECONDS = 600
+
+
+def _now_iso() -> str:
+    return datetime.now().isoformat()
 
 
 def _persist(task: TaskStatus):
@@ -60,6 +67,7 @@ def _persist(task: TaskStatus):
             error=task.error,
             started_at=task.started_at,
             completed_at=task.completed_at,
+            updated_at=task.updated_at,
         )
     except Exception:
         pass  # don't break task flow on DB error
@@ -77,7 +85,52 @@ def _task_from_row(row: dict) -> TaskStatus:
         error=row.get("error", ""),
         started_at=row.get("started_at", ""),
         completed_at=row.get("completed_at", ""),
+        updated_at=row.get("updated_at", "") or row.get("completed_at", "") or row.get("started_at", ""),
     )
+
+
+def _parse_iso(value: str) -> datetime | None:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value)
+    except ValueError:
+        return None
+
+
+def _is_stale_running_task(task: TaskStatus, now: datetime | None = None) -> bool:
+    if task.status != "running":
+        return False
+    now = now or datetime.now()
+    heartbeat = _parse_iso(task.updated_at) or _parse_iso(task.started_at)
+    if heartbeat is None:
+        return False
+    return now - heartbeat > timedelta(seconds=STALE_TASK_SECONDS)
+
+
+def _mark_task_stale(task: TaskStatus):
+    if task.status != "running":
+        return
+    task.status = "failed"
+    task.error = "Server restarted during task"
+    task.completed_at = _now_iso()
+    task.updated_at = task.completed_at
+    _persist(task)
+    if task.campaign_id is not None:
+        try:
+            import database
+            campaign = database.get_campaign(task.campaign_id)
+            if campaign and campaign.get("status") in ("generating", "crawling"):
+                database.update_campaign_status(task.campaign_id, "failed")
+                database.update_campaign_counts(task.campaign_id)
+        except Exception:
+            pass
+
+
+def _resolve_stale_task(task: TaskStatus | None) -> TaskStatus | None:
+    if task and _is_stale_running_task(task):
+        _mark_task_stale(task)
+    return task
 
 
 def _sync_task_from_db(task_id: str) -> TaskStatus | None:
@@ -135,12 +188,7 @@ def _load_from_db():
                         started_at=row.get("started_at", ""),
                         completed_at=row.get("completed_at", ""),
                     )
-                    # Mark orphaned running tasks as failed
-                    if _tasks[tid].status == "running":
-                        _tasks[tid].status = "failed"
-                        _tasks[tid].error = "Server restarted during task"
-                        _tasks[tid].completed_at = datetime.now().isoformat()
-                        _persist(_tasks[tid])
+                    _resolve_stale_task(_tasks[tid])
     except Exception:
         pass
 
@@ -156,7 +204,8 @@ def create_task(task_type: str = "", campaign_id: int | None = None) -> str:
         task_id=task_id,
         task_type=task_type,
         campaign_id=campaign_id,
-        started_at=datetime.now().isoformat(),
+        started_at=_now_iso(),
+        updated_at=_now_iso(),
     )
     with _lock:
         _tasks[task_id] = task
@@ -167,8 +216,8 @@ def create_task(task_type: str = "", campaign_id: int | None = None) -> str:
 def get_task(task_id: str) -> TaskStatus | None:
     task = _tasks.get(task_id)
     if task is not None:
-        return task
-    return _sync_task_from_db(task_id)
+        return _resolve_stale_task(task)
+    return _resolve_stale_task(_sync_task_from_db(task_id))
 
 
 def find_latest_task(
@@ -188,7 +237,7 @@ def find_latest_task(
         matches = [task for task in matches if task.status in statuses]
 
     matches.sort(key=lambda task: task.started_at or "")
-    return matches[-1] if matches else None
+    return _resolve_stale_task(matches[-1] if matches else None)
 
 
 def update_task(task_id: str, **kwargs):
@@ -197,6 +246,7 @@ def update_task(task_id: str, **kwargs):
         if task:
             for k, v in kwargs.items():
                 setattr(task, k, v)
+            task.updated_at = _now_iso()
     if task:
         _persist(task)
 
@@ -207,7 +257,8 @@ def complete_task(task_id: str, message: str = "Done"):
         if task:
             task.status = "completed"
             task.message = message
-            task.completed_at = datetime.now().isoformat()
+            task.completed_at = _now_iso()
+            task.updated_at = task.completed_at
     if task:
         _persist(task)
 
@@ -218,6 +269,7 @@ def cancel_task(task_id: str) -> bool:
         task = _tasks.get(task_id)
         if task and task.status == "running":
             task.cancel_requested = True
+            task.updated_at = _now_iso()
             _persist(task)
             return True
     return False
@@ -234,7 +286,8 @@ def mark_cancelled(task_id: str, message: str = "Cancelled by user"):
         if task:
             task.status = "cancelled"
             task.message = message
-            task.completed_at = datetime.now().isoformat()
+            task.completed_at = _now_iso()
+            task.updated_at = task.completed_at
     if task:
         _persist(task)
 
@@ -245,7 +298,8 @@ def fail_task(task_id: str, error: str):
         if task:
             task.status = "failed"
             task.error = error
-            task.completed_at = datetime.now().isoformat()
+            task.completed_at = _now_iso()
+            task.updated_at = task.completed_at
     if task:
         _persist(task)
 
@@ -275,4 +329,4 @@ def run_in_background(async_func, task_id: str, *args, **kwargs):
 def get_all_tasks() -> list[dict]:
     _sync_all_from_db()
     with _lock:
-        return [t.to_dict() for t in _tasks.values()]
+        return [_resolve_stale_task(t).to_dict() for t in _tasks.values()]
