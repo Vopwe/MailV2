@@ -384,6 +384,21 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(result["report"]["sources"]["ai"], 2)
         self.assertEqual(result["report"]["ai"]["status"], "ok")
 
+    def test_campaign_progress_units_are_monotonic_across_phases(self):
+        start_generate = _campaign_runner._overall_progress_units("generating", 0, 10)
+        end_generate = _campaign_runner._overall_progress_units("generating", 10, 10)
+        start_crawl = _campaign_runner._overall_progress_units("crawling", 0, 10)
+        end_crawl = _campaign_runner._overall_progress_units("crawling", 10, 10)
+        start_extract = _campaign_runner._overall_progress_units("extracting", 0, 10)
+        end_extract = _campaign_runner._overall_progress_units("extracting", 10, 10)
+
+        self.assertLess(start_generate, end_generate)
+        self.assertEqual(end_generate, start_crawl)
+        self.assertLess(start_crawl, end_crawl)
+        self.assertEqual(end_crawl, start_extract)
+        self.assertLess(start_extract, end_extract)
+        self.assertEqual(end_extract, _campaign_runner.PROGRESS_TOTAL_UNITS)
+
     def test_pagination_urls_preserve_structured_query_params(self):
         app = create_app()
         app.testing = True

@@ -18,6 +18,10 @@ from crawler.fetcher import crawl_urls
 from crawler.extractor import extract_emails
 
 logger = logging.getLogger(__name__)
+PROGRESS_TOTAL_UNITS = 1000
+URL_GENERATION_WEIGHT = 0.35
+CRAWL_WEIGHT = 0.45
+EXTRACTION_WEIGHT = 0.20
 
 
 def _run_async_in_thread(coro):
@@ -179,6 +183,35 @@ def _check_cancel(task_id: str, campaign_id: int):
         raise CampaignCancelled()
 
 
+def _overall_progress_units(phase: str, current: int, total: int) -> int:
+    total = max(int(total or 0), 0)
+    current = max(0, min(int(current or 0), total if total > 0 else 0))
+    if phase == "generating":
+        base = 0.0
+        weight = URL_GENERATION_WEIGHT
+    elif phase == "crawling":
+        base = URL_GENERATION_WEIGHT
+        weight = CRAWL_WEIGHT
+    elif phase == "extracting":
+        base = URL_GENERATION_WEIGHT + CRAWL_WEIGHT
+        weight = EXTRACTION_WEIGHT
+    else:
+        base = 0.0
+        weight = 1.0
+
+    ratio = (current / total) if total > 0 else 0.0
+    return min(PROGRESS_TOTAL_UNITS, round((base + (weight * ratio)) * PROGRESS_TOTAL_UNITS))
+
+
+def _update_campaign_task(task_id: str, phase: str, current: int, total: int, message: str):
+    tasks.update_task(
+        task_id,
+        progress=_overall_progress_units(phase, current, total),
+        total=PROGRESS_TOTAL_UNITS,
+        message=message,
+    )
+
+
 async def run_campaign(task_id: str, campaign_id: int):
     """Full campaign pipeline: scrape Bing for URLs → crawl → extract emails."""
     campaign = database.get_campaign(campaign_id)
@@ -206,7 +239,7 @@ async def _run_campaign_steps(task_id: str, campaign_id: int, campaign: dict):
     urls_per_batch = int(config.get_setting("urls_per_batch", config.URLS_PER_BATCH))
 
     database.update_campaign_status(campaign_id, "generating")
-    tasks.update_task(task_id, message="Scraping Bing for URLs...")
+    _update_campaign_task(task_id, "generating", 0, 1, "Generating URLs · Preparing search combinations...")
 
     combos = []
     for country in countries:
@@ -237,10 +270,12 @@ async def _run_campaign_steps(task_id: str, campaign_id: int, campaign: dict):
         urls_per_batch,
         bing_concurrency,
     )
-    tasks.update_task(
+    _update_campaign_task(
         task_id,
-        total=total_combos,
-        message=f"Scraping Bing for {total_combos} combinations ({bing_concurrency} parallel)...",
+        "generating",
+        0,
+        max(total_combos, 1),
+        f"Generating URLs · 0/{total_combos} combinations ({bing_concurrency} parallel)...",
     )
 
     all_url_rows = []
@@ -277,10 +312,12 @@ async def _run_campaign_steps(task_id: str, campaign_id: int, campaign: dict):
             with lock:
                 completed += 1
                 niche, city, country, _ = combo
-                tasks.update_task(
+                _update_campaign_task(
                     task_id,
-                    progress=completed,
-                    message=f"[{completed}/{total_combos}] Scraped: {niche} in {city}, {country}",
+                    "generating",
+                    completed,
+                    max(total_combos, 1),
+                    f"Generating URLs · {completed}/{total_combos} combinations · {niche} in {city}, {country}",
                 )
 
     generated_count = len(all_url_rows)
@@ -294,7 +331,13 @@ async def _run_campaign_steps(task_id: str, campaign_id: int, campaign: dict):
         deduped_count = before - len(all_url_rows)
         if deduped_count:
             logger.info(f"Cross-campaign dedup: removed {deduped_count} duplicate domains")
-            tasks.update_task(task_id, message=f"Removed {deduped_count} duplicate domains from other campaigns")
+            _update_campaign_task(
+                task_id,
+                "generating",
+                max(total_combos, 1),
+                max(total_combos, 1),
+                f"Generating URLs · Removed {deduped_count} duplicate domains from other campaigns",
+            )
 
     logger.info(
         "Campaign %s URL queue summary: generated=%s after_dedup=%s deduped=%s",
@@ -314,16 +357,22 @@ async def _run_campaign_steps(task_id: str, campaign_id: int, campaign: dict):
     database.update_campaign_status(campaign_id, "crawling")
     pending_urls = database.get_urls(campaign_id, status="pending")
     logger.info("Campaign %s pending crawl queue: count=%s", campaign_id, len(pending_urls))
-    tasks.update_task(
+    _update_campaign_task(
         task_id,
-        progress=0,
-        total=len(pending_urls),
-        message=f"Crawling {len(pending_urls)} URLs...",
+        "crawling",
+        0,
+        max(len(pending_urls), 1),
+        f"Crawling URLs · 0/{len(pending_urls)} domains",
     )
 
     def on_crawl_progress(done, total):
-        tasks.update_task(task_id, progress=done, total=total,
-                          message=f"Crawled {done}/{total} domains")
+        _update_campaign_task(
+            task_id,
+            "crawling",
+            done,
+            max(total, 1),
+            f"Crawling URLs · {done}/{total} domains",
+        )
 
     crawl_results, crawl_stats = await crawl_urls(pending_urls, on_progress=on_crawl_progress)
     logger.info(
@@ -338,12 +387,18 @@ async def _run_campaign_steps(task_id: str, campaign_id: int, campaign: dict):
 
     _check_cancel(task_id, campaign_id)
 
-    tasks.update_task(task_id, message="Extracting emails...")
+    _update_campaign_task(
+        task_id,
+        "extracting",
+        0,
+        max(len(pending_urls), 1),
+        f"Extracting Emails · 0/{len(pending_urls)} domains",
+    )
     total_extracted = 0
     domains_with_emails = 0
     domains_without_emails = 0
 
-    for url_record in pending_urls:
+    for index, url_record in enumerate(pending_urls, start=1):
         if tasks.is_cancelled(task_id):
             _check_cancel(task_id, campaign_id)
         url_id = url_record["id"]
@@ -370,6 +425,15 @@ async def _run_campaign_steps(task_id: str, campaign_id: int, campaign: dict):
         else:
             database.update_url_status(url_id, "failed", error="No pages fetched")
             domains_without_emails += 1
+
+        if index == len(pending_urls) or index % 10 == 0:
+            _update_campaign_task(
+                task_id,
+                "extracting",
+                index,
+                max(len(pending_urls), 1),
+                f"Extracting Emails · {index}/{len(pending_urls)} domains · {total_extracted} emails found",
+            )
 
     # Save crawl stats to campaign
     crawl_stats["domains_with_emails"] = domains_with_emails

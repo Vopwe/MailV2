@@ -74,7 +74,8 @@ function pollTasks() {
     const progressEta = document.getElementById('progress-eta');
     const startedAt = progressSection.dataset.startedAt || '';
 
-    function computeEta(percent) {
+    function computeEta(percent, task) {
+        if (!task || task.status !== 'running') return '';
         if (!startedAt || !percent || percent <= 0 || percent >= 100) return '';
         const startMs = Date.parse(startedAt);
         if (!startMs) return '';
@@ -92,11 +93,11 @@ function pollTasks() {
         return `~${hrs}h ${rem}m left`;
     }
 
-    function setProgress(percent, message) {
+    function setProgress(percent, message, task = null) {
         progressSection.style.display = '';
         if (progressBar) progressBar.style.width = `${percent}%`;
         if (progressText) progressText.textContent = message;
-        if (progressEta) progressEta.textContent = computeEta(percent);
+        if (progressEta) progressEta.textContent = computeEta(percent, task);
     }
 
     function reloadWithoutTaskParam() {
@@ -133,29 +134,34 @@ function pollTasks() {
 
         if (task.status === 'failed') {
             setStatus('failed');
-            setProgress(task.percent || 0, task.error || 'Campaign failed.');
+            setProgress(task.percent || 0, task.error || 'Campaign failed.', task);
             return;
         }
 
         if (task.status === 'completed') {
             setStatus('done');
-            setProgress(100, task.message || 'Completed!');
+            setProgress(100, task.message || 'Completed!', task);
             reloadWithoutTaskParam();
             return;
         }
 
         if (task.status === 'cancelled') {
             setStatus('cancelled');
-            setProgress(task.percent || 0, task.message || 'Cancelled.');
+            setProgress(task.percent || 0, task.message || 'Cancelled.', task);
             reloadWithoutTaskParam();
             return;
         }
 
-        const status = task.message && task.message.startsWith('Generating')
-            ? 'generating'
-            : 'crawling';
+        let status = 'running';
+        if (task.message && task.message.startsWith('Generating URLs')) {
+            status = 'generating';
+        } else if (task.message && task.message.startsWith('Crawling URLs')) {
+            status = 'crawling';
+        } else if (task.message && task.message.startsWith('Extracting Emails')) {
+            status = 'crawling';
+        }
         setStatus(status);
-        setProgress(task.percent || 0, task.message || 'Running...');
+        setProgress(task.percent || 0, task.message || 'Running...', task);
         setTimeout(poll, 1500);
     }
 
