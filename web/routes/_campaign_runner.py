@@ -114,6 +114,16 @@ async def _run_campaign_steps(task_id: str, campaign_id: int, campaign: dict):
 
     total_combos = len(combos)
     bing_concurrency = int(config.get_setting("bing_concurrency", config.BING_CONCURRENCY))
+    logger.info(
+        "Campaign %s starting URL generation: combos=%s niches=%s countries=%s cities=%s urls_per_batch=%s concurrency=%s",
+        campaign_id,
+        total_combos,
+        len(niches),
+        len(countries),
+        len(cities),
+        urls_per_batch,
+        bing_concurrency,
+    )
     tasks.update_task(
         task_id,
         total=total_combos,
@@ -136,6 +146,17 @@ async def _run_campaign_steps(task_id: str, campaign_id: int, campaign: dict):
             result = future.result()
             rows = result["rows"]
             url_generation_reports.append(result["report"])
+            report_sources = result["report"].get("sources", {})
+            logger.info(
+                "Campaign %s combo complete: niche=%s city=%s country=%s urls=%s sources=%s ai_status=%s",
+                campaign_id,
+                combo[0],
+                combo[1],
+                combo[2],
+                len(rows),
+                report_sources,
+                result["report"].get("ai", {}).get("status"),
+            )
             for row in rows:
                 row["campaign_id"] = campaign_id
             all_url_rows.extend(rows)
@@ -149,6 +170,9 @@ async def _run_campaign_steps(task_id: str, campaign_id: int, campaign: dict):
                     message=f"[{completed}/{total_combos}] Scraped: {niche} in {city}, {country}",
                 )
 
+    generated_count = len(all_url_rows)
+    logger.info("Campaign %s URL generation finished: generated_rows=%s", campaign_id, generated_count)
+
     deduped_count = 0
     if all_url_rows and config.get_setting("dedup_across_campaigns", False):
         existing_domains = database.get_existing_domains(exclude_campaign_id=campaign_id)
@@ -159,12 +183,24 @@ async def _run_campaign_steps(task_id: str, campaign_id: int, campaign: dict):
             logger.info(f"Cross-campaign dedup: removed {deduped_count} duplicate domains")
             tasks.update_task(task_id, message=f"Removed {deduped_count} duplicate domains from other campaigns")
 
+    logger.info(
+        "Campaign %s URL queue summary: generated=%s after_dedup=%s deduped=%s",
+        campaign_id,
+        generated_count,
+        len(all_url_rows),
+        deduped_count,
+    )
+
     if all_url_rows:
         database.insert_urls(all_url_rows)
+        logger.info("Campaign %s inserted URL rows: count=%s", campaign_id, len(all_url_rows))
+    else:
+        logger.warning("Campaign %s generated zero URL rows before crawl stage", campaign_id)
     database.update_campaign_counts(campaign_id)
 
     database.update_campaign_status(campaign_id, "crawling")
     pending_urls = database.get_urls(campaign_id, status="pending")
+    logger.info("Campaign %s pending crawl queue: count=%s", campaign_id, len(pending_urls))
     tasks.update_task(
         task_id,
         progress=0,
@@ -177,6 +213,15 @@ async def _run_campaign_steps(task_id: str, campaign_id: int, campaign: dict):
                           message=f"Crawled {done}/{total} domains")
 
     crawl_results, crawl_stats = await crawl_urls(pending_urls, on_progress=on_crawl_progress)
+    logger.info(
+        "Campaign %s crawl finished: domains_total=%s reachable=%s pages_fetched=%s pages_failed=%s robots_blocked=%s",
+        campaign_id,
+        crawl_stats.get("domains_total"),
+        crawl_stats.get("domains_reachable"),
+        crawl_stats.get("pages_fetched"),
+        crawl_stats.get("pages_failed"),
+        crawl_stats.get("pages_robots_blocked"),
+    )
 
     _check_cancel(task_id, campaign_id)
 
@@ -243,6 +288,7 @@ async def _run_campaign_steps(task_id: str, campaign_id: int, campaign: dict):
     if deduped_count:
         msg += f" | skipped duplicates: {deduped_count}"
 
+    logger.info("Campaign %s completed: %s", campaign_id, msg)
     tasks.complete_task(task_id, msg)
 
 
