@@ -354,6 +354,36 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(result["rows"][0]["source"], "ai")
         self.assertEqual(result["report"]["sources"]["ai"], 2)
 
+    def test_campaign_combo_tops_up_partial_search_results_with_ai(self):
+        fake_report = {
+            "tagged_urls": [
+                ("https://alpha-one.com", "bing"),
+                ("https://beta-two.com", "ddg"),
+            ],
+            "sources": {"bing": 1, "ddg": 1, "ai": 0},
+            "ai": {"status": "disabled", "requested_model": "openrouter/free", "actual_model": None, "error": None},
+        }
+        ai_result = {
+            "urls": [
+                "https://gamma-three.com",
+                "https://delta-four.com",
+                "https://beta-two.com/contact",
+            ],
+            "status": "ok",
+            "requested_model": "openrouter/free",
+            "actual_model": "openrouter/free",
+            "error": None,
+        }
+
+        with patch("web.routes._campaign_runner.generate_urls_report", return_value=fake_report), \
+             patch("web.routes._campaign_runner.generate_ai_urls_with_meta", new=AsyncMock(return_value=ai_result)):
+            result = _campaign_runner._generate_for_combo(("agency", "Seattle", "USA", ".com"), 4)
+
+        self.assertEqual(len(result["rows"]), 4)
+        self.assertEqual([row["source"] for row in result["rows"]], ["bing", "ddg", "ai", "ai"])
+        self.assertEqual(result["report"]["sources"]["ai"], 2)
+        self.assertEqual(result["report"]["ai"]["status"], "ok")
+
     def test_pagination_urls_preserve_structured_query_params(self):
         app = create_app()
         app.testing = True

@@ -54,6 +54,61 @@ def _fallback_ai_report(niche: str, city: str, country: str, count: int) -> dict
     }
 
 
+def _rows_from_tagged_urls(tagged_urls, niche: str, city: str, country: str) -> list[dict]:
+    rows = []
+    for url, source in tagged_urls:
+        ext = tldextract.extract(url)
+        domain = f"{ext.domain}.{ext.suffix}"
+        rows.append({
+            "url": url,
+            "domain": domain,
+            "niche": niche,
+            "city": city,
+            "country": country,
+            "source": source,
+        })
+    return rows
+
+
+def _top_up_combo_with_ai(report: dict, rows: list[dict], niche: str, city: str, country: str, target_count: int) -> tuple[dict, list[dict]]:
+    missing = max(target_count - len(rows), 0)
+    if missing <= 0:
+        return report, rows
+
+    logger.info(
+        "Combo %s/%s/%s below target (%s/%s). Asking AI to fill remaining %s URLs",
+        niche, city, country, len(rows), target_count, missing,
+    )
+    ai_report = _fallback_ai_report(niche, city, country, missing)
+    ai_tagged = _normalize_tagged_urls(ai_report.get("tagged_urls", []), fallback_source="ai")
+    if not ai_tagged:
+        return report, rows
+
+    seen_domains = {row["domain"] for row in rows}
+    added = 0
+    for row in _rows_from_tagged_urls(ai_tagged, niche, city, country):
+        if row["domain"] in seen_domains:
+            continue
+        seen_domains.add(row["domain"])
+        rows.append(row)
+        added += 1
+        if len(rows) >= target_count:
+            break
+
+    if added:
+        report_sources = dict(report.get("sources", {}))
+        report_sources.setdefault("bing", 0)
+        report_sources.setdefault("ddg", 0)
+        report_sources["ai"] = report_sources.get("ai", 0) + added
+        report["sources"] = report_sources
+        report["ai"] = ai_report.get("ai", report.get("ai", {}))
+        logger.info(
+            "AI top-up added %s URLs for combo %s/%s/%s",
+            added, niche, city, country,
+        )
+    return report, rows
+
+
 def _generate_for_combo(combo, urls_per_batch):
     """Worker: generate URLs for a single (niche, city, country, tld) combo."""
     niche, city, country, country_tld = combo
@@ -68,18 +123,8 @@ def _generate_for_combo(combo, urls_per_batch):
             report = _fallback_ai_report(niche, city, country, urls_per_batch)
             tagged_urls = _normalize_tagged_urls(report.get("tagged_urls", []), fallback_source="unknown")
 
-        rows = []
-        for url, source in tagged_urls:
-            ext = tldextract.extract(url)
-            domain = f"{ext.domain}.{ext.suffix}"
-            rows.append({
-                "url": url,
-                "domain": domain,
-                "niche": niche,
-                "city": city,
-                "country": country,
-                "source": source,
-            })
+        rows = _rows_from_tagged_urls(tagged_urls, niche, city, country)
+        report, rows = _top_up_combo_with_ai(report, rows, niche, city, country, urls_per_batch)
         return {
             "rows": rows,
             "report": report,
@@ -88,18 +133,12 @@ def _generate_for_combo(combo, urls_per_batch):
         logger.error(f"URL generation failed for {niche}/{city}/{country}: {e}")
         try:
             report = _fallback_ai_report(niche, city, country, urls_per_batch)
-            rows = []
-            for url, source in _normalize_tagged_urls(report.get("tagged_urls", []), fallback_source="unknown"):
-                ext = tldextract.extract(url)
-                domain = f"{ext.domain}.{ext.suffix}"
-                rows.append({
-                    "url": url,
-                    "domain": domain,
-                    "niche": niche,
-                    "city": city,
-                    "country": country,
-                    "source": source,
-                })
+            rows = _rows_from_tagged_urls(
+                _normalize_tagged_urls(report.get("tagged_urls", []), fallback_source="unknown"),
+                niche,
+                city,
+                country,
+            )
             if rows:
                 logger.info(
                     "AI-only fallback recovered combo %s/%s/%s with %s URLs",
