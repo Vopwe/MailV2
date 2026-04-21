@@ -5,6 +5,7 @@ import os
 import re
 import socket
 import sqlite3
+import subprocess
 import shutil
 import threading
 import unittest
@@ -18,6 +19,7 @@ import config
 import database
 import dns.resolver
 import logging_setup
+import networking
 import tasks
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
@@ -1087,6 +1089,32 @@ class RegressionTests(unittest.TestCase):
         with patch("verification.verifier.dns.resolver.resolve", side_effect=fake_resolve):
             self.assertTrue(verifier._check_domain_a_record("example.com"))
 
+    def test_networking_build_rotation_plan_reports_missing_candidate_ips(self):
+        def fake_run(command, capture_output=True, text=True, check=False):
+            if command == ["ip", "route", "show", "default"]:
+                return subprocess.CompletedProcess(command, 0, stdout="default via 80.96.113.1 dev eth0\n", stderr="")
+            if command == ["ip", "-j", "addr", "show", "dev", "eth0"]:
+                return subprocess.CompletedProcess(
+                    command,
+                    0,
+                    stdout='[{"ifname":"eth0","addr_info":[{"family":"inet","local":"80.96.113.252","scope":"global"},{"family":"inet6","local":"2001:678:6d4:6570::42","scope":"global"}]}]',
+                    stderr="",
+                )
+            raise AssertionError(f"Unexpected command: {command}")
+
+        plan = networking.build_rotation_plan(
+            candidate_ips=["2001:678:6d4:6570::42", "2001:678:6d4:6570::150", "80.96.113.252"],
+            configured_ips=["80.96.113.252", "80.96.113.140"],
+            runner=fake_run,
+        )
+
+        self.assertEqual(plan["interface"], "eth0")
+        self.assertEqual(plan["candidate_assigned_ips"], ["2001:678:6d4:6570::42", "80.96.113.252"])
+        self.assertEqual(plan["candidate_missing_ips"], ["2001:678:6d4:6570::150"])
+        self.assertEqual(plan["configured_missing_ips"], ["80.96.113.140"])
+        self.assertIn("2001:678:6d4:6570::150/64", plan["netplan_snippet"])
+        self.assertIn("80.96.113.252/24", plan["netplan_snippet"])
+
     def test_admin_settings_page_shows_smtp_identity_fields(self):
         config.save_settings({"onboarded": True})
         app = create_app()
@@ -1104,6 +1132,8 @@ class RegressionTests(unittest.TestCase):
         self.assertIn('name="smtp_ehlo_hostname"', html)
         self.assertIn('name="smtp_mail_from"', html)
         self.assertIn('name="search_ip_rotation_enabled"', html)
+        self.assertIn('name="rotation_candidate_ips"', html)
+        self.assertIn('id="network-helper-command"', html)
         self.assertIn("Verifier SMTP identity is using automatic fallbacks", html)
 
     def test_admin_can_save_search_ip_rotation_toggle(self):
@@ -1129,6 +1159,80 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(response.status_code, 302)
         self.assertTrue(config.get_setting("search_ip_rotation_enabled", False))
         self.assertEqual(config.get_setting("outbound_ips", []), ["2001:db8::1", "2001:db8::2"])
+
+    def test_admin_can_sync_outbound_ips_from_assigned_rotation_candidates(self):
+        config.save_settings({"onboarded": True})
+        app = create_app()
+        app.testing = True
+        app.config["WTF_CSRF_ENABLED"] = False
+        client = app.test_client()
+
+        with client.session_transaction() as session_state:
+            session_state["authenticated"] = True
+            session_state["is_admin"] = True
+
+        with patch("web.routes.settings.networking.build_rotation_plan", return_value={
+            "candidate_assigned_ips": ["2001:db8::42", "80.96.113.252"],
+        }):
+            response = client.post(
+                "/settings/",
+                data={
+                    "search_ip_rotation_enabled": "1",
+                    "rotation_network_interface": "eth0",
+                    "rotation_candidate_ips": "2001:db8::42\n2001:db8::150\n80.96.113.252",
+                    "sync_outbound_ips_from_candidates": "1",
+                },
+                follow_redirects=False,
+            )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(config.get_setting("rotation_network_interface", ""), "eth0")
+        self.assertEqual(
+            config.get_setting("rotation_candidate_ips", []),
+            ["2001:db8::42", "2001:db8::150", "80.96.113.252"],
+        )
+        self.assertEqual(config.get_setting("outbound_ips", []), ["2001:db8::42", "80.96.113.252"])
+
+    def test_admin_ip_status_api_reports_assigned_and_missing_ips(self):
+        config.save_settings({
+            "onboarded": True,
+            "rotation_network_interface": "eth0",
+            "rotation_candidate_ips": ["2001:db8::42", "2001:db8::150"],
+            "outbound_ips": ["2001:db8::42"],
+        })
+        app = create_app()
+        app.testing = True
+        client = app.test_client()
+
+        with client.session_transaction() as session_state:
+            session_state["authenticated"] = True
+            session_state["is_admin"] = True
+
+        with patch("web.routes.api.networking.build_rotation_plan", return_value={
+            "interface": "eth0",
+            "supported": True,
+            "error": None,
+            "assigned_ipv4": ["80.96.113.252"],
+            "assigned_ipv6": ["2001:db8::42"],
+            "assigned_ips": ["80.96.113.252", "2001:db8::42"],
+            "candidate_ips": ["2001:db8::42", "2001:db8::150"],
+            "candidate_assigned_ips": ["2001:db8::42"],
+            "candidate_missing_ips": ["2001:db8::150"],
+            "configured_ips": ["2001:db8::42"],
+            "configured_assigned_ips": ["2001:db8::42"],
+            "configured_missing_ips": [],
+            "recommended_outbound_ips": ["2001:db8::42"],
+            "netplan_snippet": "network:\n  version: 2\n",
+            "desired_netplan_ips": ["80.96.113.252", "2001:db8::42", "2001:db8::150"],
+            "configure_command": "sudo python3 /opt/graphenmail/deploy/configure_ip_pool.py --apply --enable-rotation",
+        }), patch("search.rotator.get_status", return_value={"enabled": True, "total_ips": 1, "available_ips": 1, "cooled_down_ips": 0, "cooldown_list": [], "unhealthy_ips": 0, "unhealthy_list": [], "ranked_ips": []}), patch("search.rotator.get_available_ips", return_value=["2001:db8::42"]), patch("search.rotator._load_ips", return_value=["2001:db8::42"]):
+            response = client.get("/api/ip-status")
+
+        payload = response.get_json()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(payload["assigned_ips"], ["80.96.113.252", "2001:db8::42"])
+        self.assertEqual(payload["candidate_missing_ips"], ["2001:db8::150"])
+        self.assertEqual(payload["configure_command"], "sudo python3 /opt/graphenmail/deploy/configure_ip_pool.py --apply --enable-rotation")
 
     def test_onboarding_password_creation_grants_admin_session(self):
         app = create_app()

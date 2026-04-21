@@ -5,6 +5,7 @@ import re
 
 from flask import Blueprint, render_template, request, redirect, url_for, flash
 import config
+import networking
 from web.auth import get_app_password, set_admin_password, set_app_password, check_password, is_admin_session
 from licensing import validator as license_validator
 
@@ -35,6 +36,34 @@ def _smtp_identity_status(settings: dict) -> dict:
         "level": "success",
         "message": "Verifier SMTP identity looks configured. Keep PTR/rDNS aligned with the EHLO hostname.",
     }
+
+
+def _rotation_status(settings: dict) -> dict:
+    plan = networking.build_rotation_plan(
+        interface=settings.get("rotation_network_interface", ""),
+        candidate_ips=settings.get("rotation_candidate_ips", []),
+        configured_ips=settings.get("outbound_ips", []),
+    )
+    try:
+        from search.rotator import get_status
+        status = get_status()
+    except Exception:
+        status = {
+            "enabled": bool(settings.get("search_ip_rotation_enabled", False)),
+            "total_ips": len(plan["configured_ips"]),
+            "available_ips": len(plan["configured_assigned_ips"]),
+            "cooled_down_ips": 0,
+            "cooldown_list": [],
+            "unhealthy_ips": 0,
+            "unhealthy_list": [],
+            "ranked_ips": [],
+        }
+    status.update(plan)
+    status["bindable_configured_count"] = len(plan["configured_assigned_ips"])
+    status["missing_configured_count"] = len(plan["configured_missing_ips"])
+    status["bindable_candidate_count"] = len(plan["candidate_assigned_ips"])
+    status["missing_candidate_count"] = len(plan["candidate_missing_ips"])
+    return status
 
 
 @bp.route("/license", methods=["POST"])
@@ -85,7 +114,18 @@ def index():
 
         # Parse outbound IPs from textarea (one per line)
         ips_raw = request.form.get("outbound_ips", "").strip()
-        outbound_ips = [ip.strip() for ip in ips_raw.splitlines() if ip.strip()]
+        outbound_ips_manual = networking.normalize_ip_list(ips_raw)
+        rotation_candidate_ips = networking.normalize_ip_list(request.form.get("rotation_candidate_ips", "").strip())
+        rotation_network_interface = request.form.get("rotation_network_interface", "").strip()
+        sync_from_candidates = request.form.get("sync_outbound_ips_from_candidates", "1") == "1"
+        outbound_ips = outbound_ips_manual
+        if sync_from_candidates and rotation_candidate_ips:
+            plan = networking.build_rotation_plan(
+                interface=rotation_network_interface,
+                candidate_ips=rotation_candidate_ips,
+                configured_ips=outbound_ips_manual,
+            )
+            outbound_ips = plan["candidate_assigned_ips"]
 
         updates = {
             "bing_concurrency": int(request.form.get("bing_concurrency", 5)),
@@ -97,6 +137,9 @@ def index():
             "ddg_delay_min": float(request.form.get("ddg_delay_min", 1.0)),
             "ddg_delay_max": float(request.form.get("ddg_delay_max", 3.0)),
             "outbound_ips": outbound_ips,
+            "rotation_candidate_ips": rotation_candidate_ips,
+            "rotation_network_interface": rotation_network_interface,
+            "sync_outbound_ips_from_candidates": sync_from_candidates,
             "verify_concurrency": int(request.form.get("verify_concurrency", 30)),
             "max_concurrent_requests": int(request.form.get("max_concurrent_requests", 30)),
             "request_timeout": int(request.form.get("request_timeout", 12)),
@@ -116,6 +159,10 @@ def index():
             verifier.clear_mx_cache()
         except Exception:
             pass
+
+        if request.form.get("search_ip_rotation_enabled") == "1" and rotation_candidate_ips and not outbound_ips:
+            flash("Rotation is enabled, but none of the candidate IPs are currently assigned on this server. Run the network installer helper first.", "error")
+            return redirect(url_for("settings.index") + "#tab-ips")
 
         # Handle password change
         new_password = request.form.get("new_password", "").strip()
@@ -141,21 +188,7 @@ def index():
 
     settings = config.get_all_settings()
 
-    # Get IP rotator status
-    ip_status = {
-        "enabled": bool(settings.get("search_ip_rotation_enabled", False)),
-        "total_ips": 0,
-        "available_ips": 0,
-        "cooled_down_ips": 0,
-        "cooldown_list": [],
-        "unhealthy_ips": 0,
-        "unhealthy_list": [],
-    }
-    try:
-        from search.rotator import get_status
-        ip_status = get_status()
-    except Exception:
-        pass
+    ip_status = _rotation_status(settings)
 
     has_password = bool(get_app_password())
     runtime_paths = config.get_runtime_paths()

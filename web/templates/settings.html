@@ -161,15 +161,37 @@
                   <input type="checkbox" name="search_ip_rotation_enabled" value="1" {% if settings.get('search_ip_rotation_enabled') %}checked{% endif %}>
                   <span>Enable Search IP Rotation</span>
                 </label>
-                <span class="hint">Off by default. Keep disabled while troubleshooting. When off, Bing and DuckDuckGo use the server default route even if IPs are saved below.</span>
+                <span class="hint">Only locally assigned server IPs can be rotated. When disabled, Bing and DuckDuckGo use the server default route.</span>
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-group">
+                <label for="rotation_network_interface">Server Interface</label>
+                <input type="text" id="rotation_network_interface" name="rotation_network_interface" value="{{ settings.get('rotation_network_interface', ip_status.interface or 'eth0') }}" placeholder="eth0">
+                <span class="hint">Linux interface that owns the rotation IP pool.</span>
+              </div>
+              <div class="form-group">
+                <label style="display:inline-flex; align-items:center; gap:8px;">
+                  <input type="checkbox" name="sync_outbound_ips_from_candidates" value="1" {% if settings.get('sync_outbound_ips_from_candidates', True) %}checked{% endif %} style="width:auto;">
+                  Sync active pool from assigned candidate IPs
+                </label>
+                <span class="hint">Recommended. Saves only candidate IPs already assigned on the server.</span>
               </div>
             </div>
             <div class="form-row">
               <div class="form-group" style="flex:1 1 100%;">
-                <label for="outbound_ips">One per line (IPv4 / IPv6)</label>
+                <label for="rotation_candidate_ips">Provider IP Pool / Extra IPs</label>
+                <textarea id="rotation_candidate_ips" name="rotation_candidate_ips" rows="7" placeholder="2001:db8::150&#10;2001:db8::198&#10;80.96.113.140">{% if settings.get('rotation_candidate_ips') %}{% for ip in settings.get('rotation_candidate_ips', []) %}{{ ip }}{% if not loop.last %}
+{% endif %}{% endfor %}{% endif %}</textarea>
+                <span class="hint">Paste every routed IP you want available for search rotation. The helper command below makes them permanent on the server.</span>
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-group" style="flex:1 1 100%;">
+                <label for="outbound_ips">Active Search Pool (one per line)</label>
                 <textarea id="outbound_ips" name="outbound_ips" rows="8" placeholder="192.168.1.100&#10;2001:db8::1">{% if settings.outbound_ips %}{% for ip in settings.outbound_ips %}{{ ip }}{% if not loop.last %}
 {% endif %}{% endfor %}{% endif %}</textarea>
-                <span class="hint">Rotated round-robin for search requests. Leave empty to use server default. You can also create an <code>ips.txt</code> in the project root.</span>
+                <span class="hint">These are the IPs GraphenMail will actually bind for Bing and DuckDuckGo. Leave empty to use the server default route.</span>
               </div>
             </div>
             {% if ip_status %}
@@ -177,13 +199,13 @@
               <div class="form-group" style="flex:1 1 100%;">
                 <label>Status</label>
                 {% if not ip_status.enabled %}
-                <div style="padding:10px 12px; background:#F3F4F6; color:#374151; border-radius:4px; font-size:13px;">Rotation disabled - search uses the server default route.</div>
-                {% elif ip_status.total_ips == 0 %}
-                <div style="padding:10px 12px; background:#FEF3C7; color:#92400E; border-radius:4px; font-size:13px;">⚠ No IPs configured — using server default IP.</div>
-                {% elif ip_status.available_ips > 0 %}
-                <div style="padding:10px 12px; background:#D1FAE5; color:#065F46; border-radius:4px; font-size:13px;">✓ {{ ip_status.available_ips }} of {{ ip_status.total_ips }} IPs active — rotation working.</div>
+                <div style="padding:10px 12px; background:#F3F4F6; color:#374151; border-radius:4px; font-size:13px;">Rotation disabled. Search uses the server default route.</div>
+                {% elif ip_status.bindable_configured_count == 0 %}
+                <div style="padding:10px 12px; background:#FEE2E2; color:#991B1B; border-radius:4px; font-size:13px;">No configured search IPs are assigned on the server. Run the helper command or use the default route.</div>
+                {% elif ip_status.missing_configured_count > 0 %}
+                <div style="padding:10px 12px; background:#FEF3C7; color:#92400E; border-radius:4px; font-size:13px;">{{ ip_status.bindable_configured_count }} configured IPs are bindable now, but {{ ip_status.missing_configured_count }} configured IPs are missing from the server interface.</div>
                 {% else %}
-                <div style="padding:10px 12px; background:#FEE2E2; color:#991B1B; border-radius:4px; font-size:13px;">⚠ All {{ ip_status.total_ips }} IPs on cooldown — waiting to recover.</div>
+                <div style="padding:10px 12px; background:#D1FAE5; color:#065F46; border-radius:4px; font-size:13px;">{{ ip_status.bindable_configured_count }} configured IPs are assigned locally and ready for rotation.</div>
                 {% endif %}
               </div>
             </div>
@@ -192,11 +214,23 @@
               <div class="form-row" style="margin-top:10px;">
                 <div class="form-group">
                   <div class="ip-status-grid">
-                    <div class="stat-mini"><span class="stat-label">Total IPs</span><span class="stat-value">{{ ip_status.total_ips }}</span></div>
-                    <div class="stat-mini"><span class="stat-label">Available</span><span class="stat-value" style="color:var(--success);">{{ ip_status.available_ips }}</span></div>
-                    <div class="stat-mini"><span class="stat-label">On Cooldown</span><span class="stat-value" style="color:var(--warning);">{{ ip_status.cooled_down_ips }}</span></div>
+                    <div class="stat-mini"><span class="stat-label">Assigned on Server</span><span class="stat-value">{{ ip_status.assigned_ips | length }}</span></div>
+                    <div class="stat-mini"><span class="stat-label">Bindable Search IPs</span><span class="stat-value" style="color:var(--success);">{{ ip_status.bindable_configured_count }}</span></div>
+                    <div class="stat-mini"><span class="stat-label">Missing from Server</span><span class="stat-value" style="color:var(--warning);">{{ ip_status.missing_configured_count }}</span></div>
                   </div>
-                  {% if ip_status.cooldown_list %}<span class="hint" style="color:var(--warning);">Cooled down: {{ ip_status.cooldown_list | join(', ') }}</span>{% endif %}
+                  <span class="hint" style="display:block;">Interface: <code>{{ ip_status.interface or 'unknown' }}</code></span>
+                  {% if ip_status.cooldown_list %}<span class="hint" style="color:var(--warning); display:block;">Cooled down: {{ ip_status.cooldown_list | join(', ') }}</span>{% endif %}
+                  {% if ip_status.assigned_ips %}<span class="hint" style="display:block;">Assigned locally: {{ ip_status.assigned_ips | join(', ') }}</span>{% endif %}
+                  {% if ip_status.configured_missing_ips %}<span class="hint" style="color:var(--warning); display:block;">Configured but not assigned: {{ ip_status.configured_missing_ips | join(', ') }}</span>{% endif %}
+                  {% if ip_status.candidate_missing_ips %}<span class="hint" style="color:var(--warning); display:block;">Candidate IPs still missing from the server: {{ ip_status.candidate_missing_ips | join(', ') }}</span>{% endif %}
+                </div>
+              </div>
+              <div class="form-row">
+                <div class="form-group" style="flex:1 1 100%;">
+                  <label>Permanent Netplan Preview</label>
+                  <textarea rows="10" readonly id="netplan-preview">{{ ip_status.netplan_snippet }}</textarea>
+                  <span class="hint" style="display:block;">Root helper command:</span>
+                  <code id="network-helper-command" style="display:block; white-space:pre-wrap; word-break:break-all;">{{ ip_status.configure_command }}</code>
                 </div>
               </div>
               <div class="form-row">
@@ -488,7 +522,7 @@ let autoRefreshTimer = null;
 
 const paneTitles = {
     search:  { title: 'Search Engines',      hint: 'Concurrency, delays, and results per page for Bing & DuckDuckGo.' },
-    ips:     { title: 'IP Rotation',         hint: 'Outbound IP pool. Rotated round-robin with cooldowns.' },
+    ips:     { title: 'IP Rotation',         hint: 'Manage routed IPs, bindable search IPs, and the permanent server network helper.' },
     ai:      { title: 'AI (OpenRouter)',     hint: 'OpenRouter API key & model for AI URL generation.' },
     crawl:   { title: 'Crawl',               hint: 'HTTP crawl behavior and robots.txt policy.' },
     verify:  { title: 'SMTP & Rules',        hint: 'SMTP identity and verifier concurrency.' },
@@ -542,11 +576,19 @@ async function refreshIpStatus() {
     try {
         const res = await fetch('/api/ip-status');
         const data = await res.json();
-        msg.textContent = `Total: ${data.total_ips} | Available: ${data.total_ips - data.cooled_down_ips} | Cooldown: ${data.cooled_down_ips}`;
-        if (data.configured_ips && data.configured_ips.length) {
-            msg.textContent += ` | IPs: ${data.configured_ips.join(', ')}`;
+        if (data.error) {
+            throw new Error(data.error);
         }
-        msg.style.color = data.total_ips > 0 ? 'var(--success)' : 'var(--warning)';
+        msg.textContent = `Assigned: ${data.assigned_ips.length} | Bindable configured: ${data.configured_assigned_ips.length} | Missing configured: ${data.configured_missing_ips.length}`;
+        msg.style.color = data.configured_assigned_ips.length > 0 ? 'var(--success)' : 'var(--warning)';
+        const preview = document.getElementById('netplan-preview');
+        if (preview && data.netplan_snippet) {
+            preview.value = data.netplan_snippet;
+        }
+        const helper = document.getElementById('network-helper-command');
+        if (helper && data.configure_command) {
+            helper.textContent = data.configure_command;
+        }
     } catch (e) {
         msg.textContent = 'Error: ' + e.message;
         msg.style.color = 'var(--danger)';

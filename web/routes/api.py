@@ -5,6 +5,8 @@ import os
 from flask import Blueprint, jsonify, request
 import tasks
 import config
+import networking
+from web.auth import admin_required
 
 bp = Blueprint("api", __name__)
 
@@ -35,13 +37,20 @@ def cities_for_country(country):
 
 
 @bp.route("/ip-status")
+@admin_required
 def ip_status():
-    """IP rotation status — check if IPs are configured and rotating."""
+    """IP rotation status with local assignment checks and installer guidance."""
     try:
         from search.rotator import get_status, get_available_ips, _load_ips
         status = get_status()
+        plan = networking.build_rotation_plan(
+            interface=config.get_setting("rotation_network_interface", ""),
+            candidate_ips=config.get_setting("rotation_candidate_ips", []),
+            configured_ips=_load_ips(),
+        )
         status["configured_ips"] = _load_ips()
         status["currently_available"] = get_available_ips()
+        status.update(plan)
         return jsonify(status)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -93,4 +102,3 @@ def logs():
         pass
 
     return jsonify({"error": "No log file found", "searched": log_paths}), 404
-

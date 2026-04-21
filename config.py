@@ -209,6 +209,9 @@ def get_all_settings() -> dict:
         "ddg_delay_min": DDG_DELAY_MIN,
         "ddg_delay_max": DDG_DELAY_MAX,
         "outbound_ips": OUTBOUND_IPS,
+        "rotation_candidate_ips": [],
+        "rotation_network_interface": "",
+        "sync_outbound_ips_from_candidates": True,
         "verify_concurrency": VERIFY_CONCURRENCY,
         "max_concurrent_requests": MAX_CONCURRENT_REQUESTS,
         "request_timeout": REQUEST_TIMEOUT,
@@ -230,6 +233,7 @@ def get_all_settings() -> dict:
 
 def get_runtime_paths() -> dict:
     return {
+        "base_dir": BASE_DIR,
         "settings": SETTINGS_PATH,
         "database": DATABASE_PATH,
         "server_out_log": os.path.join(BASE_DIR, "server.out.log"),

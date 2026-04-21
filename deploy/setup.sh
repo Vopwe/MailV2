@@ -80,6 +80,11 @@ if [ ! -f /etc/graphenmail/license.key ]; then
 fi
 
 # ── 5. Systemd service ───────────────────────────────────────────────
+read -r -p "Configure persistent search IP rotation now? [y/N]: " SETUP_ROTATION
+if [[ "$SETUP_ROTATION" =~ ^[Yy]$ ]]; then
+    python3 "$APP_DIR/deploy/configure_ip_pool.py" --interactive --apply --enable-rotation
+fi
+
 echo "[5/7] Setting up systemd service..."
 cp deploy/graphenmail.service /etc/systemd/system/graphenmail.service
 systemctl daemon-reload
