@@ -87,10 +87,10 @@ def _filter_ddg_urls(raw_urls: list[str]) -> list[str]:
 
 async def _scrape_ddg_page(query: str, ip=_AUTO_IP, allow_default_retry: bool = True) -> list[str]:
     """Scrape a single DDG HTML lite page. Returns list of URLs."""
-    from search.rotator import cooldown_ip, get_next_ip, mark_ip_unhealthy, record_ip_empty, record_ip_healthy
+    from search.rotator import cooldown_ip, get_next_ip_for_engine, mark_ip_unhealthy, record_ip_empty, record_ip_healthy
 
     if ip is _AUTO_IP:
-        ip = get_next_ip()
+        ip = get_next_ip_for_engine("ddg")
 
     headers = {
         "User-Agent": ua.random,
@@ -105,7 +105,7 @@ async def _scrape_ddg_page(query: str, ip=_AUTO_IP, allow_default_retry: bool = 
             transport = httpx.AsyncHTTPTransport(local_address=ip)
         except Exception as e:
             logger.debug(f"DDG failed to bind to IP {ip}: {e}")
-            mark_ip_unhealthy(ip, f"bind failed: {e}")
+            mark_ip_unhealthy(ip, f"bind failed: {e}", engine="ddg")
             transport = None
 
     try:
@@ -123,7 +123,7 @@ async def _scrape_ddg_page(query: str, ip=_AUTO_IP, allow_default_retry: bool = 
             if resp.status_code == 429:
                 logger.warning(f"DDG 429 rate limit on IP {ip or 'default'}")
                 if ip:
-                    cooldown_ip(ip)
+                    cooldown_ip(ip, engine="ddg")
                     if allow_default_retry:
                         logger.warning("Retrying DDG query on default route after 429 from IP %s", ip)
                         return await _scrape_ddg_page(query, ip=None, allow_default_retry=False)
@@ -132,7 +132,7 @@ async def _scrape_ddg_page(query: str, ip=_AUTO_IP, allow_default_retry: bool = 
             if resp.status_code != 200:
                 logger.warning(f"DDG returned {resp.status_code} for: {query[:60]}")
                 if ip and allow_default_retry:
-                    mark_ip_unhealthy(ip, f"HTTP {resp.status_code}")
+                    mark_ip_unhealthy(ip, f"HTTP {resp.status_code}", engine="ddg")
                     logger.warning("Retrying DDG query on default route after HTTP %s from IP %s", resp.status_code, ip)
                     return await _scrape_ddg_page(query, ip=None, allow_default_retry=False)
                 return []
@@ -140,14 +140,14 @@ async def _scrape_ddg_page(query: str, ip=_AUTO_IP, allow_default_retry: bool = 
             urls = _parse_ddg_results(resp.text)
             if ip:
                 if urls:
-                    record_ip_healthy(ip, result_count=len(urls))
+                    record_ip_healthy(ip, result_count=len(urls), engine="ddg")
                 else:
-                    record_ip_empty(ip)
+                    record_ip_empty(ip, engine="ddg")
             if not urls and ip and allow_default_retry:
                 logger.warning("Retrying DDG query on default route after 0 parsed URLs from IP %s", ip)
                 fallback_urls = await _scrape_ddg_page(query, ip=None, allow_default_retry=False)
                 if fallback_urls:
-                    mark_ip_unhealthy(ip, "0 parsed URLs while default route recovered")
+                    mark_ip_unhealthy(ip, "0 parsed URLs while default route recovered", engine="ddg")
                 return fallback_urls
             logger.info(f"DDG via IP {ip or 'default'}: {len(urls)} results")
             return urls
@@ -155,7 +155,7 @@ async def _scrape_ddg_page(query: str, ip=_AUTO_IP, allow_default_retry: bool = 
     except Exception as e:
         logger.error(f"DDG scrape error: {e}")
         if ip:
-            mark_ip_unhealthy(ip, str(e))
+            mark_ip_unhealthy(ip, str(e), engine="ddg")
             if allow_default_retry:
                 logger.warning("Retrying DDG query on default route after error from IP %s", ip)
                 return await _scrape_ddg_page(query, ip=None, allow_default_retry=False)

@@ -17,7 +17,7 @@ from bs4 import BeautifulSoup
 from fake_useragent import UserAgent
 
 import config
-from search.rotator import cooldown_ip, get_next_ip, mark_ip_unhealthy, record_ip_empty, record_ip_healthy
+from search.rotator import cooldown_ip, get_next_ip_for_engine, mark_ip_unhealthy, record_ip_empty, record_ip_healthy
 from search.queries import build_queries
 
 logger = logging.getLogger(__name__)
@@ -305,7 +305,7 @@ async def _scrape_bing_page(
     Returns (urls, was_blocked).
     """
     if ip is _AUTO_IP:
-        ip = get_next_ip()
+        ip = get_next_ip_for_engine("bing")
     delay_min = float(config.get_setting("bing_delay_min", config.BING_DELAY_MIN))
     delay_max = float(config.get_setting("bing_delay_max", config.BING_DELAY_MAX))
 
@@ -340,7 +340,7 @@ async def _scrape_bing_page(
             transport = httpx.AsyncHTTPTransport(local_address=ip)
         except Exception as e:
             logger.debug(f"Failed to bind to IP {ip}: {e}")
-            mark_ip_unhealthy(ip, f"bind failed: {e}")
+            mark_ip_unhealthy(ip, f"bind failed: {e}", engine="bing")
             transport = None
 
     try:
@@ -357,7 +357,7 @@ async def _scrape_bing_page(
             if resp.status_code == 429:
                 logger.warning(f"Bing 429 rate limit on IP {ip}")
                 if ip:
-                    cooldown_ip(ip)
+                    cooldown_ip(ip, engine="bing")
                     if allow_default_retry:
                         logger.warning("Retrying Bing query on default route after 429 from IP %s", ip)
                         return await _scrape_bing_page(
@@ -368,7 +368,7 @@ async def _scrape_bing_page(
             if resp.status_code != 200:
                 logger.warning(f"Bing returned {resp.status_code} for query: {query[:60]}")
                 if ip and allow_default_retry:
-                    mark_ip_unhealthy(ip, f"HTTP {resp.status_code}")
+                    mark_ip_unhealthy(ip, f"HTTP {resp.status_code}", engine="bing")
                     logger.warning("Retrying Bing query on default route after HTTP %s from IP %s", resp.status_code, ip)
                     return await _scrape_bing_page(
                         query, first=first, mkt=mkt, cc=cc, ip=None, allow_default_retry=False
@@ -379,7 +379,7 @@ async def _scrape_bing_page(
             if _is_captcha_response(html):
                 logger.warning(f"Bing captcha detected on IP {ip}")
                 if ip:
-                    cooldown_ip(ip)
+                    cooldown_ip(ip, engine="bing")
                     if allow_default_retry:
                         logger.warning("Retrying Bing query on default route after captcha on IP %s", ip)
                         return await _scrape_bing_page(
@@ -390,16 +390,16 @@ async def _scrape_bing_page(
             urls = _parse_bing_results(html)
             if ip:
                 if urls:
-                    record_ip_healthy(ip, result_count=len(urls))
+                    record_ip_healthy(ip, result_count=len(urls), engine="bing")
                 else:
-                    record_ip_empty(ip)
+                    record_ip_empty(ip, engine="bing")
             if not urls and ip and allow_default_retry:
                 logger.warning("Retrying Bing query on default route after 0 parsed URLs from IP %s", ip)
                 fallback_urls, was_blocked = await _scrape_bing_page(
                     query, first=first, mkt=mkt, cc=cc, ip=None, allow_default_retry=False
                 )
                 if fallback_urls:
-                    mark_ip_unhealthy(ip, "0 parsed URLs while default route recovered")
+                    mark_ip_unhealthy(ip, "0 parsed URLs while default route recovered", engine="bing")
                 return fallback_urls, was_blocked
             logger.info(f"Bing via IP {ip or 'default'}: {len(urls)} results")
             return urls, False
@@ -407,7 +407,7 @@ async def _scrape_bing_page(
     except Exception as e:
         logger.error(f"Bing scrape error: {e}")
         if ip:
-            mark_ip_unhealthy(ip, str(e))
+            mark_ip_unhealthy(ip, str(e), engine="bing")
             if allow_default_retry:
                 logger.warning("Retrying Bing query on default route after error from IP %s", ip)
                 return await _scrape_bing_page(

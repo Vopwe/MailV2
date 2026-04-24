@@ -100,6 +100,15 @@ class RegressionTests(unittest.TestCase):
         self._license_context = isolated_license_paths()
         self._license_context.__enter__()
         tasks._tasks.clear()
+        rotator._index = 0
+        rotator._cooldowns.clear()
+        rotator._engine_cooldowns.clear()
+        rotator._engine_fallback_until.clear()
+        rotator._engine_failure_events.clear()
+        rotator._health_cache.clear()
+        rotator._ip_stats.clear()
+        rotator._engine_stats.clear()
+        rotator._empty_streaks.clear()
         os.environ["GM_SKIP_LICENSE"] = "1"
 
     def tearDown(self):
@@ -111,6 +120,14 @@ class RegressionTests(unittest.TestCase):
         os.environ.pop("ADMIN_PASSWORD", None)
         os.environ.pop("GM_ADMIN_PASSWORD_HASH", None)
         tasks._tasks.clear()
+        rotator._cooldowns.clear()
+        rotator._engine_cooldowns.clear()
+        rotator._engine_fallback_until.clear()
+        rotator._engine_failure_events.clear()
+        rotator._health_cache.clear()
+        rotator._ip_stats.clear()
+        rotator._engine_stats.clear()
+        rotator._empty_streaks.clear()
         self._license_context.__exit__(None, None, None)
         self._db_context.__exit__(None, None, None)
         self._config_context.__exit__(None, None, None)
@@ -1053,6 +1070,39 @@ class RegressionTests(unittest.TestCase):
         self.assertNotEqual(second, first)
         self.assertIn(third, {"2001:db8::21", "2001:db8::22", "2001:db8::23"})
 
+    def test_rotator_tracks_bing_and_ddg_ip_health_separately(self):
+        with patch("search.rotator.config.get_setting", side_effect=lambda key, default=None: {
+            "search_ip_rotation_enabled": True,
+            "outbound_ips": ["2001:db8::30", "2001:db8::31"],
+        }.get(key, default)):
+            rotator.record_ip_healthy("2001:db8::30", result_count=4, engine="ddg")
+            rotator.record_ip_healthy("2001:db8::31", result_count=4, engine="bing")
+            rotator.record_ip_empty("2001:db8::30", engine="bing")
+            rotator.record_ip_empty("2001:db8::30", engine="bing")
+
+            bing_choice = rotator.get_next_ip_for_engine("bing")
+            ddg_choice = rotator.get_next_ip_for_engine("ddg")
+            status = rotator.get_status()
+
+        self.assertEqual(bing_choice, "2001:db8::31")
+        self.assertEqual(ddg_choice, "2001:db8::30")
+        self.assertEqual(status["ranked_by_engine"]["bing"][0]["ip"], "2001:db8::31")
+        self.assertEqual(status["ranked_by_engine"]["ddg"][0]["ip"], "2001:db8::30")
+
+    def test_rotator_falls_back_to_default_route_after_engine_pool_failures(self):
+        with patch("search.rotator.config.get_setting", side_effect=lambda key, default=None: {
+            "search_ip_rotation_enabled": True,
+            "outbound_ips": [f"2001:db8::{i}" for i in range(40, 48)],
+        }.get(key, default)):
+            for i in range(rotator.ENGINE_FAILURE_THRESHOLD):
+                rotator.mark_ip_unhealthy(f"2001:db8::{40 + i}", "blocked", engine="bing")
+
+            self.assertIsNone(rotator.get_next_ip_for_engine("bing"))
+            status = rotator.get_status()
+
+        self.assertIn("bing", status["engine_fallbacks"])
+        self.assertGreater(status["engine_fallbacks"]["bing"], 0)
+
     def test_rotator_status_tolerates_legacy_health_cache_entries(self):
         rotator._index = 0
         rotator._cooldowns.clear()
@@ -1107,7 +1157,7 @@ class RegressionTests(unittest.TestCase):
         def fake_get_setting(_key, default=None):
             return default
 
-        with patch("search.scraper.get_next_ip", return_value="2001:db8::9"), \
+        with patch("search.scraper.get_next_ip_for_engine", return_value="2001:db8::9"), \
              patch("search.scraper.httpx.AsyncHTTPTransport", side_effect=lambda local_address=None: {"local_address": local_address}), \
              patch("search.scraper.httpx.AsyncClient", side_effect=fake_async_client), \
              patch("search.scraper._is_captcha_response", return_value=False), \
@@ -1121,7 +1171,7 @@ class RegressionTests(unittest.TestCase):
         self.assertFalse(was_blocked)
         self.assertIsNotNone(client_calls[0])
         self.assertIsNone(client_calls[1])
-        mark_ip_unhealthy.assert_called_once_with("2001:db8::9", "0 parsed URLs while default route recovered")
+        mark_ip_unhealthy.assert_called_once_with("2001:db8::9", "0 parsed URLs while default route recovered", engine="bing")
 
     def test_ddg_bound_ip_falls_back_to_default_route_and_marks_ip_unhealthy(self):
         from search import duckduckgo
@@ -1157,7 +1207,7 @@ class RegressionTests(unittest.TestCase):
             client_calls.append(kwargs.get("transport"))
             return clients.pop(0)
 
-        with patch("search.rotator.get_next_ip", return_value="2001:db8::10"), \
+        with patch("search.rotator.get_next_ip_for_engine", return_value="2001:db8::10"), \
              patch("search.duckduckgo.httpx.AsyncHTTPTransport", side_effect=lambda local_address=None: {"local_address": local_address}), \
              patch("search.duckduckgo.httpx.AsyncClient", side_effect=fake_async_client), \
              patch("search.duckduckgo._parse_ddg_results", side_effect=lambda html: ["https://example.com"] if html == "DEFAULT" else []), \
@@ -1168,7 +1218,7 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(urls, ["https://example.com"])
         self.assertIsNotNone(client_calls[0])
         self.assertIsNone(client_calls[1])
-        mark_ip_unhealthy.assert_called_once_with("2001:db8::10", "HTTP 500")
+        mark_ip_unhealthy.assert_called_once_with("2001:db8::10", "HTTP 500", engine="ddg")
 
     def test_verifier_uses_configured_ipv6_safe_identity(self):
         verifier.clear_mx_cache()

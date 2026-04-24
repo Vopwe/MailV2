@@ -220,11 +220,53 @@
                   </div>
                   <span class="hint" style="display:block;">Interface: <code>{{ ip_status.interface or 'unknown' }}</code></span>
                   {% if ip_status.cooldown_list %}<span class="hint" style="color:var(--warning); display:block;">Cooled down: {{ ip_status.cooldown_list | join(', ') }}</span>{% endif %}
+                  {% if ip_status.engine_fallbacks %}
+                  <span class="hint" style="color:var(--warning); display:block;">
+                    Engine fallback active:
+                    {% for engine, seconds in ip_status.engine_fallbacks.items() %}{{ engine|upper }} using default route for ~{{ seconds }}s{% if not loop.last %}, {% endif %}{% endfor %}
+                  </span>
+                  {% endif %}
                   {% if ip_status.assigned_ips %}<span class="hint" style="display:block;">Assigned locally: {{ ip_status.assigned_ips | join(', ') }}</span>{% endif %}
                   {% if ip_status.configured_missing_ips %}<span class="hint" style="color:var(--warning); display:block;">Configured but not assigned: {{ ip_status.configured_missing_ips | join(', ') }}</span>{% endif %}
                   {% if ip_status.candidate_missing_ips %}<span class="hint" style="color:var(--warning); display:block;">Candidate IPs still missing from the server: {{ ip_status.candidate_missing_ips | join(', ') }}</span>{% endif %}
                 </div>
               </div>
+              {% if ip_status.ranked_by_engine %}
+              <div class="form-row">
+                <div class="form-group" style="flex:1 1 100%;">
+                  <label>Search Engine IP Scores</label>
+                  {% for engine, rows in ip_status.ranked_by_engine.items() %}
+                  <div class="hint" style="margin:8px 0 4px; font-weight:700;">{{ engine|upper }}</div>
+                  <div style="overflow:auto;">
+                    <table class="table table-sm table-compact">
+                      <thead>
+                        <tr>
+                          <th>IP</th>
+                          <th>Score</th>
+                          <th>Success</th>
+                          <th>Empty</th>
+                          <th>Fail</th>
+                          <th>Cooldown</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {% for row in rows[:8] %}
+                        <tr>
+                          <td><code>{{ row.ip }}</code></td>
+                          <td>{{ row.score }}</td>
+                          <td>{{ row.search_successes }}</td>
+                          <td>{{ row.empty_results }}</td>
+                          <td>{{ row.failures }}</td>
+                          <td>{{ row.cooldown }}s</td>
+                        </tr>
+                        {% endfor %}
+                      </tbody>
+                    </table>
+                  </div>
+                  {% endfor %}
+                </div>
+              </div>
+              {% endif %}
               <div class="form-row">
                 <div class="form-group" style="flex:1 1 100%;">
                   <label>Permanent Netplan Preview</label>
