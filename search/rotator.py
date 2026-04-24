@@ -79,11 +79,29 @@ def _source_address(ip: str, family: socket.AddressFamily):
     return (ip, 0)
 
 
+def _parse_health_cache_entry(entry) -> tuple[float, bool] | None:
+    if isinstance(entry, dict):
+        try:
+            return float(entry.get("expires_at", 0)), bool(entry.get("healthy"))
+        except (TypeError, ValueError):
+            return None
+    if isinstance(entry, (list, tuple)) and len(entry) >= 2:
+        try:
+            return float(entry[0]), bool(entry[1])
+        except (TypeError, ValueError):
+            return None
+    return None
+
+
 def _get_cached_health(ip: str, now: float | None = None) -> bool | None:
     now = time.time() if now is None else now
     with _lock:
-        cached = _health_cache.get(ip)
+        cached_entry = _health_cache.get(ip)
+        if not cached_entry:
+            return None
+        cached = _parse_health_cache_entry(cached_entry)
         if not cached:
+            _health_cache.pop(ip, None)
             return None
         expires_at, healthy = cached
         if expires_at < now:
@@ -288,11 +306,15 @@ def get_status() -> dict:
     now = time.time()
     with _lock:
         cooled = [ip for ip in all_ips if _cooldowns.get(ip, 0) >= now]
-        unhealthy = [
-            ip
-            for ip, (expires_at, healthy) in _health_cache.items()
-            if not healthy and expires_at >= now
-        ]
+        unhealthy = []
+        for ip, raw_entry in list(_health_cache.items()):
+            cached = _parse_health_cache_entry(raw_entry)
+            if not cached:
+                _health_cache.pop(ip, None)
+                continue
+            expires_at, healthy = cached
+            if not healthy and expires_at >= now:
+                unhealthy.append(ip)
         ranked_ips = sorted(
             (
                 {

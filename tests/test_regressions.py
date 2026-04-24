@@ -8,6 +8,7 @@ import sqlite3
 import subprocess
 import shutil
 import threading
+import time
 import unittest
 from contextlib import contextmanager
 from datetime import datetime, timedelta
@@ -1022,6 +1023,23 @@ class RegressionTests(unittest.TestCase):
         self.assertIn(second, {"2001:db8::22", "2001:db8::23"})
         self.assertNotEqual(second, first)
         self.assertIn(third, {"2001:db8::21", "2001:db8::22", "2001:db8::23"})
+
+    def test_rotator_status_tolerates_legacy_health_cache_entries(self):
+        rotator._index = 0
+        rotator._cooldowns.clear()
+        rotator._health_cache.clear()
+        rotator._ip_stats.clear()
+
+        with patch("search.rotator.config.get_setting", side_effect=lambda key, default=None: {
+            "search_ip_rotation_enabled": True,
+            "outbound_ips": ["2001:db8::50"],
+        }.get(key, default)):
+            rotator._health_cache["2001:db8::50"] = (time.time() + 60, False, "legacy-extra-value")
+            status = rotator.get_status()
+            available = rotator.get_available_ips()
+
+        self.assertEqual(status["unhealthy_list"], ["2001:db8::50"])
+        self.assertEqual(available, [])
 
     def test_bing_bound_ip_falls_back_to_default_route_and_marks_ip_unhealthy(self):
         from search import scraper
