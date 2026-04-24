@@ -64,6 +64,8 @@ function pollTasks() {
     const campaignId = Number(progressSection.dataset.campaignId || 0);
     let taskId = progressSection.dataset.taskId || '';
     let hasReloaded = false;
+    let displayedTaskId = taskId;
+    let displayedPercent = Number(progressBar?.style.width?.replace('%', '') || 0);
 
     function setStatus(status) {
         if (!statusBadge) return;
@@ -94,6 +96,15 @@ function pollTasks() {
     }
 
     function setProgress(percent, message, task = null) {
+        const nextTaskId = task?.task_id || taskId || '';
+        if (nextTaskId && nextTaskId !== displayedTaskId) {
+            displayedTaskId = nextTaskId;
+            displayedPercent = 0;
+        }
+        if (task && task.status === 'running') {
+            percent = Math.max(displayedPercent, percent || 0);
+        }
+        displayedPercent = percent || 0;
         progressSection.style.display = '';
         if (progressBar) progressBar.style.width = `${percent}%`;
         if (progressText) progressText.textContent = message;
@@ -135,6 +146,15 @@ function pollTasks() {
         progressSection.dataset.startedAt = startedAt;
 
         if (task.status === 'failed') {
+            if ((task.error || '').includes('Server restarted during task')) {
+                setProgress(task.percent || displayedPercent || 0, 'Rechecking campaign worker...', task);
+                setTimeout(() => {
+                    taskId = '';
+                    progressSection.dataset.taskId = '';
+                    poll();
+                }, 1500);
+                return;
+            }
             setStatus('failed');
             setProgress(task.percent || 0, task.error || 'Campaign failed.', task);
             return;

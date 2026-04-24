@@ -171,6 +171,35 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(task.total, 10)
         self.assertEqual(task.message, "Running step 3")
 
+    def test_heartbeat_refreshes_running_task_without_changing_progress(self):
+        task_id = tasks.create_task(task_type="campaign", campaign_id=101)
+        tasks.update_task(task_id, progress=4, total=10, message="Still working")
+        before = tasks.get_task(task_id).updated_at
+
+        with patch("tasks._now_iso", return_value="2099-01-01T00:00:00"):
+            tasks.heartbeat_task(task_id)
+
+        tasks._tasks.clear()
+        task = tasks.get_task(task_id)
+
+        self.assertIsNotNone(task)
+        self.assertEqual(task.progress, 4)
+        self.assertEqual(task.total, 10)
+        self.assertEqual(task.message, "Still working")
+        self.assertNotEqual(task.updated_at, before)
+        self.assertEqual(task.updated_at, "2099-01-01T00:00:00")
+
+    def test_stale_window_allows_long_running_fresh_heartbeat(self):
+        task_id = tasks.create_task(task_type="campaign", campaign_id=102)
+        heartbeat = (datetime.now() - timedelta(seconds=tasks.STALE_TASK_SECONDS - 60)).isoformat()
+        tasks.update_task(task_id, updated_at=heartbeat)
+
+        task = tasks.get_task(task_id)
+
+        self.assertIsNotNone(task)
+        self.assertEqual(task.status, "running")
+        self.assertEqual(task.error, "")
+
     def test_complete_task_marks_progress_fully_done(self):
         task_id = tasks.create_task(task_type="campaign", campaign_id=55)
         tasks.update_task(task_id, progress=350, total=1000, message="Crawling")

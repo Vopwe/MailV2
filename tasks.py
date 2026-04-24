@@ -4,6 +4,7 @@ Tasks are persisted to SQLite so they survive restarts.
 """
 import threading
 import asyncio
+import time
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -45,7 +46,8 @@ class TaskStatus:
 # In-memory cache (fast reads); DB is source of truth
 _tasks: dict[str, TaskStatus] = {}
 _lock = threading.Lock()
-STALE_TASK_SECONDS = 600
+STALE_TASK_SECONDS = 1800
+HEARTBEAT_SECONDS = 20
 
 
 def _now_iso() -> str:
@@ -251,6 +253,15 @@ def update_task(task_id: str, **kwargs):
         _persist(task)
 
 
+def heartbeat_task(task_id: str):
+    with _lock:
+        task = _tasks.get(task_id)
+        if not task or task.status != "running":
+            return
+        task.updated_at = _now_iso()
+    _persist(task)
+
+
 def complete_task(task_id: str, message: str = "Done"):
     with _lock:
         task = _tasks.get(task_id)
@@ -311,6 +322,14 @@ def fail_task(task_id: str, error: str):
 def run_in_background(async_func, task_id: str, *args, **kwargs):
     """Run an async function in a background thread with its own event loop."""
     def wrapper():
+        stop_heartbeat = threading.Event()
+
+        def heartbeat_loop():
+            while not stop_heartbeat.wait(HEARTBEAT_SECONDS):
+                heartbeat_task(task_id)
+
+        heartbeat_thread = threading.Thread(target=heartbeat_loop, daemon=True)
+        heartbeat_thread.start()
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         try:
@@ -318,6 +337,8 @@ def run_in_background(async_func, task_id: str, *args, **kwargs):
         except Exception as e:
             fail_task(task_id, str(e))
         finally:
+            stop_heartbeat.set()
+            heartbeat_task(task_id)
             try:
                 import database
                 database.close_db()
