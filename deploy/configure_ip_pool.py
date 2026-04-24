@@ -85,7 +85,13 @@ def main() -> int:
         raw_ips = _read_ips_file(args.ips_file)
     else:
         saved = config.get_setting("rotation_candidate_ips", [])
-        raw_ips = "\n".join(saved) if isinstance(saved, list) else str(saved or "")
+        if isinstance(saved, list) and saved:
+            raw_ips = "\n".join(saved)
+        elif saved:
+            raw_ips = str(saved)
+        else:
+            fallback = config.get_setting("outbound_ips", [])
+            raw_ips = "\n".join(fallback) if isinstance(fallback, list) else str(fallback or "")
 
     if args.interactive and not raw_ips.strip():
         raw_ips = _interactive_ip_input()

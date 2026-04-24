@@ -28,6 +28,9 @@ def new_campaign():
         niches_raw = request.form.get("niches", "").strip()
         countries = request.form.getlist("countries")
         cities = request.form.getlist("cities")
+        source_mode = request.form.get("source_mode", "both").strip() or "both"
+        if source_mode not in {"both", "search_only", "ai_only"}:
+            source_mode = "both"
 
         if not name or not niches_raw or not countries:
             flash("Please fill in all required fields.", "error")
@@ -38,7 +41,7 @@ def new_campaign():
         if not cities:
             cities = ["*"]
 
-        campaign_id = database.insert_campaign(name, niches, countries, cities)
+        campaign_id = database.insert_campaign(name, niches, countries, cities, source_mode=source_mode)
         flash(f"Campaign '{name}' created successfully.", "success")
         return redirect(url_for("campaigns.detail", campaign_id=campaign_id))
 

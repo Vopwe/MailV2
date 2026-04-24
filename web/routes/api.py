@@ -43,9 +43,10 @@ def ip_status():
     try:
         from search.rotator import get_status, get_available_ips, _load_ips
         status = get_status()
+        candidate_ips = config.get_setting("rotation_candidate_ips", []) or _load_ips()
         plan = networking.build_rotation_plan(
             interface=config.get_setting("rotation_network_interface", ""),
-            candidate_ips=config.get_setting("rotation_candidate_ips", []),
+            candidate_ips=candidate_ips,
             configured_ips=_load_ips(),
         )
         status["configured_ips"] = _load_ips()

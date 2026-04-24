@@ -113,13 +113,24 @@ def _top_up_combo_with_ai(report: dict, rows: list[dict], niche: str, city: str,
     return report, rows
 
 
-def _generate_for_combo(combo, urls_per_batch):
+def _generate_for_combo(combo, urls_per_batch, source_mode: str = "both"):
     """Worker: generate URLs for a single (niche, city, country, tld) combo."""
     niche, city, country, country_tld = combo
+    source_mode = (source_mode or "both").strip().lower()
     try:
-        report = generate_urls_report(niche, city, country, country_tld, count=urls_per_batch)
+        if source_mode == "ai_only":
+            report = _fallback_ai_report(niche, city, country, urls_per_batch)
+        else:
+            report = generate_urls_report(
+                niche,
+                city,
+                country,
+                country_tld,
+                count=urls_per_batch,
+                source_mode=source_mode,
+            )
         tagged_urls = _normalize_tagged_urls(report.get("tagged_urls", []), fallback_source="unknown")
-        if not tagged_urls:
+        if not tagged_urls and source_mode != "search_only":
             logger.warning(
                 "Search URL generation returned 0 rows for %s/%s/%s, falling back to AI-only generator",
                 niche, city, country,
@@ -128,13 +139,27 @@ def _generate_for_combo(combo, urls_per_batch):
             tagged_urls = _normalize_tagged_urls(report.get("tagged_urls", []), fallback_source="unknown")
 
         rows = _rows_from_tagged_urls(tagged_urls, niche, city, country)
-        report, rows = _top_up_combo_with_ai(report, rows, niche, city, country, urls_per_batch)
+        if source_mode == "both":
+            report, rows = _top_up_combo_with_ai(report, rows, niche, city, country, urls_per_batch)
         return {
             "rows": rows,
             "report": report,
         }
     except Exception as e:
         logger.error(f"URL generation failed for {niche}/{city}/{country}: {e}")
+        if source_mode == "search_only":
+            return {
+                "rows": [],
+                "report": {
+                    "sources": {"bing": 0, "ddg": 0, "ai": 0},
+                    "ai": {
+                        "status": "disabled",
+                        "requested_model": config.get_setting("openrouter_model", ""),
+                        "actual_model": None,
+                        "error": None,
+                    },
+                },
+            }
         try:
             report = _fallback_ai_report(niche, city, country, urls_per_batch)
             rows = _rows_from_tagged_urls(
@@ -236,6 +261,7 @@ async def _run_campaign_steps(task_id: str, campaign_id: int, campaign: dict):
     niches = campaign["niches"]
     countries = campaign["countries"]
     cities = campaign["cities"]
+    source_mode = (campaign.get("source_mode") or "both").strip().lower()
     urls_per_batch = int(config.get_setting("urls_per_batch", config.URLS_PER_BATCH))
 
     database.update_campaign_status(campaign_id, "generating")
@@ -285,7 +311,7 @@ async def _run_campaign_steps(task_id: str, campaign_id: int, campaign: dict):
 
     with ThreadPoolExecutor(max_workers=bing_concurrency) as executor:
         futures = {
-            executor.submit(_generate_for_combo, combo, urls_per_batch): combo
+            executor.submit(_generate_for_combo, combo, urls_per_batch, source_mode): combo
             for combo in combos
         }
         for future in as_completed(futures):

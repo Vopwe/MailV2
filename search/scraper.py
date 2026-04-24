@@ -449,7 +449,14 @@ async def _scrape_query(query_str: str, target_count: int, mkt: str = "en-US", c
     return all_urls
 
 
-def generate_urls(niche: str, city: str, country: str, country_tld: str = ".com", count: int = 40) -> list[tuple[str, str]]:
+def generate_urls(
+    niche: str,
+    city: str,
+    country: str,
+    country_tld: str = ".com",
+    count: int = 40,
+    source_mode: str = "both",
+) -> list[tuple[str, str]]:
     """
     Generate URLs by scraping Bing + DuckDuckGo + OpenRouter AI.
     Bing and DDG run in parallel first. If they don't reach the target count,
@@ -464,12 +471,19 @@ def generate_urls(niche: str, city: str, country: str, country_tld: str = ".com"
     mkt, cc = _get_bing_market(country)
     logger.info(f"Bing market: {mkt} (cc={cc}) for country: {country}")
 
+    source_mode = (source_mode or "both").strip().lower()
     queries = build_queries(niche, city, country, country_tld, count)
     bing_urls = []
     ddg_urls = []
     ai_urls = []
 
     async def _run():
+        if source_mode == "ai_only":
+            logger.info("URL generation mode ai_only for %s in %s, %s", niche, city, country)
+            result = await generate_ai_urls(niche, city, country, count=count)
+            ai_urls.extend(result)
+            return
+
         # Phase 1: Run Bing and DDG in parallel
         async def _bing_task():
             for i, q_info in enumerate(queries):
@@ -502,6 +516,10 @@ def generate_urls(niche: str, city: str, country: str, country_tld: str = ".com"
             ext = tldextract.extract(url)
             domain = f"{ext.domain}.{ext.suffix}"
             seen_domains.add(domain)
+
+        if source_mode == "search_only":
+            logger.info(f"Search-only mode returned {len(seen_domains)} URLs for {niche} in {city}, {country}")
+            return
 
         remaining = count - len(seen_domains)
         if remaining > 0:
@@ -572,7 +590,14 @@ def generate_urls(niche: str, city: str, country: str, country_tld: str = ".com"
     return result
 
 
-def generate_urls_report(niche: str, city: str, country: str, country_tld: str = ".com", count: int = 40) -> dict:
+def generate_urls_report(
+    niche: str,
+    city: str,
+    country: str,
+    country_tld: str = ".com",
+    count: int = 40,
+    source_mode: str = "both",
+) -> dict:
     """
     Generate URLs plus AI/source metadata for campaign health reporting.
     """
@@ -582,6 +607,7 @@ def generate_urls_report(niche: str, city: str, country: str, country_tld: str =
     mkt, cc = _get_bing_market(country)
     logger.info(f"Bing market: {mkt} (cc={cc}) for country: {country}")
 
+    source_mode = (source_mode or "both").strip().lower()
     queries = build_queries(niche, city, country, country_tld, count)
     bing_urls = []
     ddg_urls = []
@@ -594,6 +620,18 @@ def generate_urls_report(niche: str, city: str, country: str, country_tld: str =
     }
 
     async def _run():
+        if source_mode == "ai_only":
+            logger.info("URL generation report mode ai_only for %s in %s, %s", niche, city, country)
+            result = await generate_ai_urls_with_meta(niche, city, country, count=count)
+            ai_meta.update({
+                "status": result["status"],
+                "requested_model": result["requested_model"],
+                "actual_model": result["actual_model"],
+                "error": result["error"],
+            })
+            ai_urls.extend(result["urls"])
+            return
+
         async def _bing_task():
             for i, q_info in enumerate(queries):
                 query_str = q_info["query"]
@@ -624,6 +662,16 @@ def generate_urls_report(niche: str, city: str, country: str, country_tld: str =
             ext = tldextract.extract(url)
             domain = f"{ext.domain}.{ext.suffix}"
             seen_domains.add(domain)
+
+        if source_mode == "search_only":
+            ai_meta.update({
+                "status": "disabled",
+                "requested_model": config.get_setting("openrouter_model", ""),
+                "actual_model": None,
+                "error": None,
+            })
+            logger.info(f"Search-only mode kept {len(seen_domains)} URLs for {niche} in {city}, {country}")
+            return
 
         remaining = count - len(seen_domains)
         if remaining > 0:

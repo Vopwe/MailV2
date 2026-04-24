@@ -412,6 +412,37 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(result["report"]["sources"]["ai"], 2)
         self.assertEqual(result["report"]["ai"]["status"], "ok")
 
+    def test_campaign_combo_search_only_skips_ai_fallback_and_top_up(self):
+        fake_report = {
+            "tagged_urls": [("https://alpha-one.com", "bing")],
+            "sources": {"bing": 1, "ddg": 0, "ai": 0},
+            "ai": {"status": "disabled", "requested_model": "openrouter/free", "actual_model": None, "error": None},
+        }
+
+        with patch("web.routes._campaign_runner.generate_urls_report", return_value=fake_report), \
+             patch("web.routes._campaign_runner.generate_ai_urls_with_meta", new=AsyncMock(side_effect=AssertionError("AI should not run"))):
+            result = _campaign_runner._generate_for_combo(("agency", "Seattle", "USA", ".com"), 4, "search_only")
+
+        self.assertEqual(len(result["rows"]), 1)
+        self.assertEqual(result["rows"][0]["source"], "bing")
+        self.assertEqual(result["report"]["sources"]["ai"], 0)
+
+    def test_campaign_combo_ai_only_skips_search_generation(self):
+        ai_result = {
+            "urls": ["https://alpha-ai.com", "https://beta-ai.com"],
+            "status": "ok",
+            "requested_model": "openrouter/free",
+            "actual_model": "openrouter/free",
+            "error": None,
+        }
+
+        with patch("web.routes._campaign_runner.generate_urls_report", side_effect=AssertionError("search should not run")), \
+             patch("web.routes._campaign_runner.generate_ai_urls_with_meta", new=AsyncMock(return_value=ai_result)):
+            result = _campaign_runner._generate_for_combo(("agency", "Seattle", "USA", ".com"), 5, "ai_only")
+
+        self.assertEqual(len(result["rows"]), 2)
+        self.assertEqual([row["source"] for row in result["rows"]], ["ai", "ai"])
+
     def test_campaign_progress_units_are_monotonic_across_phases(self):
         start_generate = _campaign_runner._overall_progress_units("generating", 0, 10)
         end_generate = _campaign_runner._overall_progress_units("generating", 10, 10)
@@ -554,6 +585,29 @@ class RegressionTests(unittest.TestCase):
         self.assertIn(f"/campaigns/{campaign_id}", location)
         self.assertIn("campaign_task=", location)
         run_in_background.assert_called_once()
+
+    def test_new_campaign_persists_source_mode(self):
+        config.save_settings({"onboarded": True})
+        app = create_app()
+        app.testing = True
+        app.config["WTF_CSRF_ENABLED"] = False
+        client = app.test_client()
+
+        response = client.post(
+            "/campaigns/new",
+            data={
+                "name": "Mode test",
+                "niches": "agency",
+                "countries": ["USA"],
+                "cities": ["Seattle"],
+                "source_mode": "search_only",
+            },
+            follow_redirects=False,
+        )
+
+        self.assertEqual(response.status_code, 302)
+        campaign = database.get_campaign(1)
+        self.assertEqual(campaign["source_mode"], "search_only")
 
     def test_campaign_run_resets_stale_generating_status_when_no_running_task(self):
         config.save_settings({"onboarded": True})
@@ -1115,6 +1169,30 @@ class RegressionTests(unittest.TestCase):
         self.assertIn("2001:678:6d4:6570::150/64", plan["netplan_snippet"])
         self.assertIn("80.96.113.252/24", plan["netplan_snippet"])
 
+    def test_networking_build_rotation_plan_uses_configured_ips_when_candidates_missing(self):
+        def fake_run(command, capture_output=True, text=True, check=False):
+            if command == ["ip", "route", "show", "default"]:
+                return subprocess.CompletedProcess(command, 0, stdout="default via 80.96.113.1 dev eth0\n", stderr="")
+            if command == ["ip", "-j", "addr", "show", "dev", "eth0"]:
+                return subprocess.CompletedProcess(
+                    command,
+                    0,
+                    stdout='[{"ifname":"eth0","addr_info":[{"family":"inet","local":"80.96.113.252","prefixlen":24,"scope":"global"},{"family":"inet6","local":"2001:678:6d4:6570::42","prefixlen":64,"scope":"global"}]}]',
+                    stderr="",
+                )
+            raise AssertionError(f"Unexpected command: {command}")
+
+        plan = networking.build_rotation_plan(
+            candidate_ips=[],
+            configured_ips=["80.96.113.252", "2001:678:6d4:6570::150"],
+            runner=fake_run,
+        )
+
+        self.assertEqual(plan["candidate_ips"], ["80.96.113.252", "2001:678:6d4:6570::150"])
+        self.assertEqual(plan["candidate_assigned_ips"], ["80.96.113.252"])
+        self.assertEqual(plan["candidate_missing_ips"], ["2001:678:6d4:6570::150"])
+        self.assertIn("2001:678:6d4:6570::150/64", plan["netplan_snippet"])
+
     def test_admin_settings_page_shows_smtp_identity_fields(self):
         config.save_settings({"onboarded": True})
         app = create_app()
@@ -1192,6 +1270,29 @@ class RegressionTests(unittest.TestCase):
             ["2001:db8::42", "2001:db8::150", "80.96.113.252"],
         )
         self.assertEqual(config.get_setting("outbound_ips", []), ["2001:db8::42", "80.96.113.252"])
+
+    def test_admin_save_uses_outbound_ips_as_candidates_when_candidate_box_empty(self):
+        config.save_settings({"onboarded": True})
+        app = create_app()
+        app.testing = True
+        app.config["WTF_CSRF_ENABLED"] = False
+        client = app.test_client()
+
+        with client.session_transaction() as session_state:
+            session_state["authenticated"] = True
+            session_state["is_admin"] = True
+
+        response = client.post(
+            "/settings/",
+            data={
+                "search_ip_rotation_enabled": "1",
+                "outbound_ips": "2001:db8::42\n2001:db8::150",
+            },
+            follow_redirects=False,
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(config.get_setting("rotation_candidate_ips", []), ["2001:db8::42", "2001:db8::150"])
 
     def test_admin_ip_status_api_reports_assigned_and_missing_ips(self):
         config.save_settings({

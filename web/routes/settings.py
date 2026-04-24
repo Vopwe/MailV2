@@ -39,9 +39,10 @@ def _smtp_identity_status(settings: dict) -> dict:
 
 
 def _rotation_status(settings: dict) -> dict:
+    candidate_ips = settings.get("rotation_candidate_ips", []) or settings.get("outbound_ips", [])
     plan = networking.build_rotation_plan(
         interface=settings.get("rotation_network_interface", ""),
-        candidate_ips=settings.get("rotation_candidate_ips", []),
+        candidate_ips=candidate_ips,
         configured_ips=settings.get("outbound_ips", []),
     )
     try:
@@ -116,6 +117,8 @@ def index():
         ips_raw = request.form.get("outbound_ips", "").strip()
         outbound_ips_manual = networking.normalize_ip_list(ips_raw)
         rotation_candidate_ips = networking.normalize_ip_list(request.form.get("rotation_candidate_ips", "").strip())
+        if not rotation_candidate_ips and outbound_ips_manual:
+            rotation_candidate_ips = list(outbound_ips_manual)
         rotation_network_interface = request.form.get("rotation_network_interface", "").strip()
         sync_from_candidates = request.form.get("sync_outbound_ips_from_candidates", "1") == "1"
         outbound_ips = outbound_ips_manual
@@ -125,7 +128,8 @@ def index():
                 candidate_ips=rotation_candidate_ips,
                 configured_ips=outbound_ips_manual,
             )
-            outbound_ips = plan["candidate_assigned_ips"]
+            if plan.get("supported", True):
+                outbound_ips = plan["candidate_assigned_ips"]
 
         updates = {
             "bing_concurrency": int(request.form.get("bing_concurrency", 5)),

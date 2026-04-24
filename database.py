@@ -69,6 +69,7 @@ def _decode_campaign_row(row: sqlite3.Row | None) -> dict | None:
     data["niches"] = json.loads(data["niches"])
     data["countries"] = json.loads(data["countries"])
     data["cities"] = json.loads(data["cities"])
+    data["source_mode"] = data.get("source_mode") or "both"
     return data
 
 
@@ -89,6 +90,17 @@ def _ensure_task_columns(db: sqlite3.Connection):
     columns = {row["name"] for row in db.execute("PRAGMA table_info(task_status)").fetchall()}
     additions = {
         "updated_at": "ALTER TABLE task_status ADD COLUMN updated_at TEXT DEFAULT ''",
+    }
+    for name, ddl in additions.items():
+        if name not in columns:
+            db.execute(ddl)
+
+
+def _ensure_campaign_columns(db: sqlite3.Connection):
+    columns = {row["name"] for row in db.execute("PRAGMA table_info(campaigns)").fetchall()}
+    additions = {
+        "crawl_stats": "ALTER TABLE campaigns ADD COLUMN crawl_stats TEXT",
+        "source_mode": "ALTER TABLE campaigns ADD COLUMN source_mode TEXT DEFAULT 'both'",
     }
     for name, ddl in additions.items():
         if name not in columns:
@@ -133,6 +145,7 @@ def init_db():
             niches      TEXT NOT NULL,
             countries   TEXT NOT NULL,
             cities      TEXT NOT NULL,
+            source_mode TEXT NOT NULL DEFAULT 'both',
             status      TEXT NOT NULL DEFAULT 'pending',
             total_urls  INTEGER DEFAULT 0,
             total_emails INTEGER DEFAULT 0,
@@ -187,15 +200,16 @@ def init_db():
     """)
         _ensure_email_columns(db)
         _ensure_task_columns(db)
+        _ensure_campaign_columns(db)
 
 
 # ── Campaign CRUD ─────────────────────────────────────────────────────
 
-def insert_campaign(name: str, niches: list, countries: list, cities: list) -> int:
+def insert_campaign(name: str, niches: list, countries: list, cities: list, source_mode: str = "both") -> int:
     with _write_db() as db:
         cur = db.execute(
-            "INSERT INTO campaigns (name, niches, countries, cities) VALUES (?, ?, ?, ?)",
-            (name, json.dumps(niches), json.dumps(countries), json.dumps(cities)),
+            "INSERT INTO campaigns (name, niches, countries, cities, source_mode) VALUES (?, ?, ?, ?, ?)",
+            (name, json.dumps(niches), json.dumps(countries), json.dumps(cities), source_mode),
         )
         return cur.lastrowid
 
@@ -262,12 +276,9 @@ def get_campaign_stats(campaign_id: int) -> dict | None:
 
 
 def _ensure_campaigns_stats_column():
-    """Add crawl_stats column if it doesn't exist."""
-    db = get_db()
-    columns = {row["name"] for row in db.execute("PRAGMA table_info(campaigns)").fetchall()}
-    if "crawl_stats" not in columns:
-        with _write_db() as wdb:
-            wdb.execute("ALTER TABLE campaigns ADD COLUMN crawl_stats TEXT")
+    """Backwards-compatible wrapper for older callers."""
+    with _write_db() as db:
+        _ensure_campaign_columns(db)
 
 
 # ── URL CRUD ──────────────────────────────────────────────────────────

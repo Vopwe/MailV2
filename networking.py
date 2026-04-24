@@ -172,15 +172,16 @@ def build_rotation_plan(
 ) -> dict:
     local = detect_local_ips(interface=interface, runner=runner)
     assigned_set = set(local["assigned_ips"])
-    candidate_list = normalize_ip_list(candidate_ips)
     configured_list = normalize_ip_list(configured_ips)
+    candidate_list = normalize_ip_list(candidate_ips)
+    effective_candidate_list = candidate_list or configured_list
 
-    candidate_assigned = [ip for ip in candidate_list if ip in assigned_set]
-    candidate_missing = [ip for ip in candidate_list if ip not in assigned_set]
+    candidate_assigned = [ip for ip in effective_candidate_list if ip in assigned_set]
+    candidate_missing = [ip for ip in effective_candidate_list if ip not in assigned_set]
     configured_assigned = [ip for ip in configured_list if ip in assigned_set]
     configured_missing = [ip for ip in configured_list if ip not in assigned_set]
 
-    desired_for_netplan = normalize_ip_list(local["assigned_ips"] + candidate_list)
+    desired_for_netplan = normalize_ip_list(local["assigned_ips"] + effective_candidate_list)
     recommended_outbound = candidate_assigned or configured_assigned or local["assigned_ips"]
 
     return {
@@ -192,7 +193,8 @@ def build_rotation_plan(
         "ipv4_prefixlen": local.get("ipv4_prefixlen", 24),
         "ipv6_prefixlen": local.get("ipv6_prefixlen", 64),
         "assigned_ips": local["assigned_ips"],
-        "candidate_ips": candidate_list,
+        "candidate_ips": effective_candidate_list,
+        "saved_candidate_ips": candidate_list,
         "candidate_assigned_ips": candidate_assigned,
         "candidate_missing_ips": candidate_missing,
         "configured_ips": configured_list,
