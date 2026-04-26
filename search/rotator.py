@@ -11,6 +11,7 @@ import time
 from pathlib import Path
 
 import config
+import httpx
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +46,8 @@ HEALTHCHECK_HOSTS = (
     "www.bing.com",
     "html.duckduckgo.com",
 )
+VALIDATION_QUERY = "plumber los angeles contact"
+VALIDATION_TIMEOUT_SECONDS = 12.0
 
 
 def _load_ips() -> list[str]:
@@ -72,6 +75,21 @@ def _load_ips() -> list[str]:
             return result
 
     return []
+
+
+def _ip_matches_family_mode(ip: str, mode: str | None = None) -> bool:
+    raw_mode = mode or config.get_setting("search_ip_family_mode", "both") or "both"
+    mode = raw_mode.strip().lower() if isinstance(raw_mode, str) else "both"
+    if mode in ("", "both", "all"):
+        return True
+    family = _ip_family(ip)
+    if family is None:
+        return False
+    if mode == "ipv4":
+        return family == socket.AF_INET
+    if mode == "ipv6":
+        return family == socket.AF_INET6
+    return True
 
 
 def _ip_family(ip: str) -> socket.AddressFamily | None:
@@ -300,6 +318,7 @@ def get_available_ips(engine: str | None = None) -> list[str]:
         return []
 
     all_ips = _load_ips()
+    all_ips = [ip for ip in all_ips if _ip_matches_family_mode(ip)]
     if not all_ips:
         return []
 
@@ -412,12 +431,152 @@ def cooldown_ip(ip: str, *, engine: str | None = None):
 
 def get_ip_count() -> int:
     """Total configured IPs."""
-    return len(_load_ips())
+    return len([ip for ip in _load_ips() if _ip_matches_family_mode(ip)])
+
+
+def _validate_bing_ip(ip: str) -> dict:
+    from search.scraper import BING_SEARCH_URL, _filter_urls, _is_captcha_response, _parse_bing_results
+
+    params = {
+        "q": VALIDATION_QUERY,
+        "count": "10",
+        "setlang": "en",
+        "mkt": "en-US",
+        "cc": "US",
+    }
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Referer": "https://www.bing.com/",
+    }
+    try:
+        transport = httpx.HTTPTransport(local_address=ip)
+        with httpx.Client(
+            transport=transport,
+            timeout=httpx.Timeout(VALIDATION_TIMEOUT_SECONDS),
+            headers=headers,
+            follow_redirects=True,
+            http2=False,
+            verify=config.tls_verify(),
+        ) as client:
+            resp = client.get(BING_SEARCH_URL, params=params)
+        raw_count = 0
+        filtered_count = 0
+        captcha = False
+        if resp.status_code == 200:
+            captcha = _is_captcha_response(resp.text)
+            raw_urls = _parse_bing_results(resp.text)
+            raw_count = len(raw_urls)
+            filtered_count = len(_filter_urls(raw_urls))
+        return {
+            "ok": resp.status_code == 200 and filtered_count > 0 and not captcha,
+            "status_code": resp.status_code,
+            "raw_results": raw_count,
+            "results": filtered_count,
+            "blocked": resp.status_code in (403, 429) or captcha,
+            "error": None,
+        }
+    except Exception as exc:
+        return {
+            "ok": False,
+            "status_code": None,
+            "raw_results": 0,
+            "results": 0,
+            "blocked": False,
+            "error": str(exc),
+        }
+
+
+def _validate_ddg_ip(ip: str) -> dict:
+    from search.duckduckgo import DDG_URL, _filter_ddg_urls, _parse_ddg_results
+
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Referer": "https://duckduckgo.com/",
+    }
+    try:
+        transport = httpx.HTTPTransport(local_address=ip)
+        with httpx.Client(
+            transport=transport,
+            timeout=httpx.Timeout(VALIDATION_TIMEOUT_SECONDS),
+            headers=headers,
+            follow_redirects=True,
+            verify=config.tls_verify(),
+        ) as client:
+            resp = client.post(DDG_URL, data={"q": VALIDATION_QUERY, "b": ""})
+        raw_count = 0
+        filtered_count = 0
+        if resp.status_code == 200:
+            raw_urls = _parse_ddg_results(resp.text)
+            raw_count = len(raw_urls)
+            filtered_count = len(_filter_ddg_urls(raw_urls))
+        return {
+            "ok": resp.status_code == 200 and filtered_count > 0,
+            "status_code": resp.status_code,
+            "raw_results": raw_count,
+            "results": filtered_count,
+            "blocked": resp.status_code in (403, 429),
+            "error": None,
+        }
+    except Exception as exc:
+        return {
+            "ok": False,
+            "status_code": None,
+            "raw_results": 0,
+            "results": 0,
+            "blocked": False,
+            "error": str(exc),
+        }
+
+
+def validate_ip_for_search(ip: str) -> dict:
+    try:
+        normalized_ip = ipaddress.ip_address(str(ip).strip()).compressed
+    except ValueError:
+        return {"ip": ip, "family": "invalid", "bing": {"ok": False, "error": "invalid IP"}, "ddg": {"ok": False, "error": "invalid IP"}}
+
+    family = "ipv6" if ipaddress.ip_address(normalized_ip).version == 6 else "ipv4"
+    bing = _validate_bing_ip(normalized_ip)
+    ddg = _validate_ddg_ip(normalized_ip)
+    if bing["ok"]:
+        record_ip_healthy(normalized_ip, result_count=bing["results"], engine="bing")
+    else:
+        record_ip_empty(normalized_ip, engine="bing")
+    if ddg["ok"]:
+        record_ip_healthy(normalized_ip, result_count=ddg["results"], engine="ddg")
+    else:
+        record_ip_empty(normalized_ip, engine="ddg")
+    return {
+        "ip": normalized_ip,
+        "family": family,
+        "ok": bool(bing["ok"] or ddg["ok"]),
+        "bing": bing,
+        "ddg": ddg,
+    }
+
+
+def validate_rotation_pool(limit: int | None = None) -> dict:
+    ips = [ip for ip in _load_ips() if _ip_matches_family_mode(ip)]
+    if limit:
+        ips = ips[:max(0, int(limit))]
+    results = [validate_ip_for_search(ip) for ip in ips]
+    return {
+        "query": VALIDATION_QUERY,
+        "family_mode": config.get_setting("search_ip_family_mode", "both"),
+        "total": len(results),
+        "usable": sum(1 for item in results if item.get("ok")),
+        "bing_usable": sum(1 for item in results if item.get("bing", {}).get("ok")),
+        "ddg_usable": sum(1 for item in results if item.get("ddg", {}).get("ok")),
+        "results": results,
+    }
 
 
 def get_status() -> dict:
     """Status summary for debugging."""
-    all_ips = _load_ips()
+    all_ips = [ip for ip in _load_ips() if _ip_matches_family_mode(ip)]
     now = time.time()
     with _lock:
         cooled = [ip for ip in all_ips if _cooldowns.get(ip, 0) >= now]

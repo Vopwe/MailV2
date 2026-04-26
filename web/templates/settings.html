@@ -171,6 +171,17 @@
                 <span class="hint">Linux interface that owns the rotation IP pool.</span>
               </div>
               <div class="form-group">
+                <label for="search_ip_family_mode">Search IP Family</label>
+                <select id="search_ip_family_mode" name="search_ip_family_mode">
+                  <option value="both" {% if settings.get('search_ip_family_mode', 'both') == 'both' %}selected{% endif %}>IPv4 + IPv6</option>
+                  <option value="ipv4" {% if settings.get('search_ip_family_mode') == 'ipv4' %}selected{% endif %}>IPv4 only</option>
+                  <option value="ipv6" {% if settings.get('search_ip_family_mode') == 'ipv6' %}selected{% endif %}>IPv6 only</option>
+                </select>
+                <span class="hint">Use this to isolate weak IPv6 or IPv4 search behavior.</span>
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-group">
                 <label style="display:inline-flex; align-items:center; gap:8px;">
                   <input type="checkbox" name="sync_outbound_ips_from_candidates" value="1" {% if settings.get('sync_outbound_ips_from_candidates', True) %}checked{% endif %} style="width:auto;">
                   Sync active pool from assigned candidate IPs
@@ -278,9 +289,11 @@
               <div class="form-row">
                 <div class="form-group">
                   <button type="button" class="btn btn-secondary" onclick="refreshIpStatus()" style="margin-top:8px;">Refresh Status</button>
+                  <button type="button" class="btn btn-secondary" onclick="validateIpPool()" style="margin-top:8px;">Validate Rotation Pool</button>
                   <span class="hint" id="ip-refresh-msg"></span>
                 </div>
               </div>
+              <pre id="ip-validation-results" style="display:none; margin-top: 12px; max-height: 280px; overflow:auto; background:#F9FAFB; border:1px solid var(--border); padding:12px; border-radius:4px; font-size:12px;"></pre>
             </details>
             {% endif %}
           </div>
@@ -620,7 +633,46 @@ async function refreshIpStatus() {
         const data = await res.json();
         if (data.error) {
             throw new Error(data.error);
+  }
+
+async function validateIpPool() {
+    const msg = document.getElementById('ip-refresh-msg');
+    const output = document.getElementById('ip-validation-results');
+    if (msg) {
+        msg.textContent = 'Validating real Bing/DDG results...';
+        msg.style.color = 'var(--text-muted)';
+    }
+    if (output) {
+        output.style.display = 'block';
+        output.textContent = 'Running live validation. This can take a minute for large pools...';
+    }
+    try {
+        const res = await fetch('/api/ip-validate', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({})
+        });
+        const data = await res.json();
+        if (data.error) throw new Error(data.error);
+        if (msg) {
+            msg.textContent = `Validation: ${data.usable}/${data.total} usable | Bing ${data.bing_usable} | DDG ${data.ddg_usable}`;
+            msg.style.color = data.usable > 0 ? 'var(--success)' : 'var(--warning)';
         }
+        if (output) {
+            output.textContent = data.results.map(item => {
+                const bing = item.bing || {};
+                const ddg = item.ddg || {};
+                return `${item.ip} (${item.family}) | Bing: ${bing.results || 0} results ${bing.ok ? 'OK' : 'BAD'}${bing.error ? ' - ' + bing.error : ''} | DDG: ${ddg.results || 0} results ${ddg.ok ? 'OK' : 'BAD'}${ddg.error ? ' - ' + ddg.error : ''}`;
+            }).join('\n') || 'No IPs configured.';
+        }
+    } catch (e) {
+        if (msg) {
+            msg.textContent = 'Validation Error: ' + e.message;
+            msg.style.color = 'var(--danger)';
+        }
+        if (output) output.textContent = 'Validation failed: ' + e.message;
+    }
+}
         msg.textContent = `Assigned: ${data.assigned_ips.length} | Bindable configured: ${data.configured_assigned_ips.length} | Missing configured: ${data.configured_missing_ips.length}`;
         msg.style.color = data.configured_assigned_ips.length > 0 ? 'var(--success)' : 'var(--warning)';
         const preview = document.getElementById('netplan-preview');

@@ -57,6 +57,19 @@ def ip_status():
         return jsonify({"error": str(e)}), 500
 
 
+@bp.route("/ip-validate", methods=["POST"])
+@admin_required
+def ip_validate():
+    """Validate configured rotation IPs against real Bing/DDG parsed results."""
+    try:
+        from search.rotator import validate_rotation_pool
+        limit = request.json.get("limit") if request.is_json and request.json else request.form.get("limit")
+        payload = validate_rotation_pool(limit=int(limit or 0) or None)
+        return jsonify(payload)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 @bp.route("/logs")
 def logs():
     """Return last N lines of server log."""

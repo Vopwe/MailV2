@@ -1002,6 +1002,46 @@ class RegressionTests(unittest.TestCase):
         self.assertFalse(status["enabled"])
         self.assertEqual(status["total_ips"], 2)
 
+    def test_rotator_filters_pool_by_ip_family_mode(self):
+        with patch("search.rotator.config.get_setting", side_effect=lambda key, default=None: {
+            "search_ip_rotation_enabled": True,
+            "search_ip_family_mode": "ipv4",
+            "outbound_ips": ["80.96.113.252", "2001:db8::42"],
+        }.get(key, default)), patch("search.rotator._probe_ip_health", return_value=True):
+            available = rotator.get_available_ips()
+            status = rotator.get_status()
+
+        self.assertEqual(available, ["80.96.113.252"])
+        self.assertEqual(status["total_ips"], 1)
+
+    def test_rotator_validation_reports_bing_and_ddg_results(self):
+        with patch("search.rotator.config.get_setting", side_effect=lambda key, default=None: {
+            "search_ip_family_mode": "both",
+            "outbound_ips": ["80.96.113.252"],
+        }.get(key, default)), \
+             patch("search.rotator._validate_bing_ip", return_value={
+                 "ok": False,
+                 "status_code": 200,
+                 "raw_results": 0,
+                 "results": 0,
+                 "blocked": False,
+                 "error": None,
+             }), \
+             patch("search.rotator._validate_ddg_ip", return_value={
+                 "ok": True,
+                 "status_code": 200,
+                 "raw_results": 4,
+                 "results": 3,
+                 "blocked": False,
+                 "error": None,
+             }):
+            payload = rotator.validate_rotation_pool()
+
+        self.assertEqual(payload["total"], 1)
+        self.assertEqual(payload["usable"], 1)
+        self.assertEqual(payload["bing_usable"], 0)
+        self.assertEqual(payload["ddg_usable"], 1)
+
     def test_rotator_prefers_ip_with_real_results_over_probe_only_ip(self):
         rotator._index = 0
         rotator._cooldowns.clear()
@@ -1334,6 +1374,55 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(response.status_code, 302)
         self.assertTrue(config.get_setting("search_ip_rotation_enabled", False))
         self.assertEqual(config.get_setting("outbound_ips", []), ["2001:db8::1", "2001:db8::2"])
+
+    def test_admin_can_save_search_ip_family_mode(self):
+        config.save_settings({"onboarded": True})
+        app = create_app()
+        app.testing = True
+        app.config["WTF_CSRF_ENABLED"] = False
+        client = app.test_client()
+
+        with client.session_transaction() as session_state:
+            session_state["authenticated"] = True
+            session_state["is_admin"] = True
+
+        response = client.post(
+            "/settings/",
+            data={
+                "search_ip_rotation_enabled": "1",
+                "search_ip_family_mode": "ipv6",
+                "outbound_ips": "2001:db8::1",
+            },
+            follow_redirects=False,
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(config.get_setting("search_ip_family_mode"), "ipv6")
+
+    def test_admin_can_validate_rotation_pool(self):
+        config.save_settings({"onboarded": True})
+        app = create_app()
+        app.testing = True
+        client = app.test_client()
+
+        with client.session_transaction() as session_state:
+            session_state["authenticated"] = True
+            session_state["is_admin"] = True
+
+        with patch("search.rotator.validate_rotation_pool", return_value={
+            "query": "plumber los angeles contact",
+            "family_mode": "both",
+            "total": 1,
+            "usable": 1,
+            "bing_usable": 0,
+            "ddg_usable": 1,
+            "results": [],
+        }):
+            response = client.post("/api/ip-validate", json={})
+
+        payload = response.get_json()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(payload["usable"], 1)
 
     def test_admin_can_sync_outbound_ips_from_assigned_rotation_candidates(self):
         config.save_settings({"onboarded": True})
