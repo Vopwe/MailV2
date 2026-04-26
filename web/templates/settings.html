@@ -633,7 +633,22 @@ async function refreshIpStatus() {
         const data = await res.json();
         if (data.error) {
             throw new Error(data.error);
-  }
+        }
+        msg.textContent = `Assigned: ${data.assigned_ips.length} | Bindable configured: ${data.configured_assigned_ips.length} | Missing configured: ${data.configured_missing_ips.length}`;
+        msg.style.color = data.configured_assigned_ips.length > 0 ? 'var(--success)' : 'var(--warning)';
+        const preview = document.getElementById('netplan-preview');
+        if (preview && data.netplan_snippet) {
+            preview.value = data.netplan_snippet;
+        }
+        const helper = document.getElementById('network-helper-command');
+        if (helper && data.configure_command) {
+            helper.textContent = data.configure_command;
+        }
+    } catch (e) {
+        msg.textContent = 'Error: ' + e.message;
+        msg.style.color = 'var(--danger)';
+    }
+}
 
 async function validateIpPool() {
     const msg = document.getElementById('ip-refresh-msg');
@@ -671,21 +686,6 @@ async function validateIpPool() {
             msg.style.color = 'var(--danger)';
         }
         if (output) output.textContent = 'Validation failed: ' + e.message;
-    }
-}
-        msg.textContent = `Assigned: ${data.assigned_ips.length} | Bindable configured: ${data.configured_assigned_ips.length} | Missing configured: ${data.configured_missing_ips.length}`;
-        msg.style.color = data.configured_assigned_ips.length > 0 ? 'var(--success)' : 'var(--warning)';
-        const preview = document.getElementById('netplan-preview');
-        if (preview && data.netplan_snippet) {
-            preview.value = data.netplan_snippet;
-        }
-        const helper = document.getElementById('network-helper-command');
-        if (helper && data.configure_command) {
-            helper.textContent = data.configure_command;
-        }
-    } catch (e) {
-        msg.textContent = 'Error: ' + e.message;
-        msg.style.color = 'var(--danger)';
     }
 }
 
